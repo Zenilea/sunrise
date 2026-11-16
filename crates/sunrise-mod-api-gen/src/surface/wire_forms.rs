@@ -1,6 +1,6 @@
 //! How each API type crosses the WebAssembly boundary, read from the code that makes it cross:
 //! the `Wire` derive (with `#[wire(via = T)]`), a hand-written `impl Wire` (its
-//! `layout_fields!` list, or a `layout` that returns another type's), including the impls the
+//! `layout_fields!` list, or a `layout_via!` naming the type it crosses as), including the impls the
 //! API's own macros write once expanded.
 use crate::index::{Found, Index, ItemId};
 pub(super) use mod_source::layouts::WireForm;
@@ -54,50 +54,28 @@ fn layout_fields(tokens: proc_macro2::TokenStream) -> Option<Vec<(String, Type)>
     Some(pairs.into_iter().map(|Pair(n, t)| (n, t)).collect())
 }
 
-/// What a hand-written impl's items declare.
+/// What a hand-written impl's items declare: `layout_fields!("a" => T, …)`, or `layout_via!(T)`
+/// when it crosses as `T`.
 fn impl_form(items: &[syn::ImplItem], module: usize) -> WireForm {
     for item in items {
-        if let syn::ImplItem::Macro(mac) = item
-            && mac
-                .mac
-                .path
-                .segments
-                .last()
-                .is_some_and(|s| s.ident == "layout_fields")
-        {
-            return match layout_fields(mac.mac.tokens.clone()) {
-                Some(fields) => WireForm::Fields(fields, module),
-                None => WireForm::Manual,
-            };
-        }
-    }
-    for item in items {
-        let syn::ImplItem::Fn(function) = item else {
+        let syn::ImplItem::Macro(mac) = item else {
             continue;
         };
-        if function.sig.ident != "layout" {
-            continue;
-        }
-        // `<T>::layout(visiting)` or `<T as Wire>::layout(visiting)`: it crosses as `T`.
-        if let [syn::Stmt::Expr(syn::Expr::Call(call), None)] = &function.block.stmts[..]
-            && let syn::Expr::Path(callee) = &*call.func
-            && callee
-                .path
-                .segments
-                .last()
-                .is_some_and(|s| s.ident == "layout")
-        {
-            if let Some(qself) = &callee.qself {
-                return WireForm::Via((*qself.ty).clone(), module);
+        match mac.mac.path.segments.last() {
+            Some(name) if name.ident == "layout_fields" => {
+                return match layout_fields(mac.mac.tokens.clone()) {
+                    Some(fields) => WireForm::Fields(fields, module),
+                    None => WireForm::Manual,
+                };
             }
-            let mut path = callee.path.clone();
-            path.segments.pop();
-            path.segments.pop_punct();
-            if !path.segments.is_empty() {
-                return WireForm::Via(Type::Path(syn::TypePath { qself: None, path }), module);
+            Some(name) if name.ident == "layout_via" => {
+                return match syn::parse2::<Type>(mac.mac.tokens.clone()) {
+                    Ok(ty) => WireForm::Via(ty, module),
+                    Err(_) => WireForm::Manual,
+                };
             }
+            _ => {}
         }
-        return WireForm::Manual;
     }
     WireForm::Manual
 }

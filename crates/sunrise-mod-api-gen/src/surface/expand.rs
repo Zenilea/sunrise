@@ -8,8 +8,8 @@ use std::collections::{BTreeMap, HashMap};
 use syn::Item;
 
 /// Macros whose module-level calls write no item a mod can name, or that the export reads by
-/// itself (`include!` through the index, `layout_fields!` through the wire forms).
-const KNOWN: &[&str] = &["include", "layout_fields", "thread_local"];
+/// itself (`include!` through the index, `layout_fields!` and `layout_via!` through the wire forms).
+const KNOWN: &[&str] = &["include", "layout_fields", "layout_via", "thread_local"];
 
 /// One element of a matcher.
 #[derive(Clone, Debug)]

@@ -148,9 +148,7 @@ impl Wire for Ident {
 /// A name that crosses as a string.
 pub struct Name(String);
 impl Wire for Name {
-    fn layout(visiting: &mut Vec<&'static str>) -> u64 {
-        String::layout(visiting)
-    }
+    layout_via!(String);
 }
 /// Context that crosses by a hand-written impl alone.
 pub struct Context;
@@ -901,7 +899,7 @@ fn how_a_type_crosses_changes_its_shape_and_not_its_hash() {
             (
                 LIB,
                 "/// A name that crosses as a string.",
-                "impl Wire for Text {\n    fn layout(visiting: &mut Vec<&'static str>) -> u64 {\n        String::layout(visiting)\n    }\n}\n/// A name that crosses as a string.",
+                "impl Wire for Text {\n    layout_via!(String);\n}\n/// A name that crosses as a string.",
             ),
         ],
         HOOKS,
