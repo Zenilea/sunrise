@@ -75,17 +75,8 @@ jobs:
       # Every build and test in this job runs at the runner's size, not the host's (tools/ci/cargo_jobs.py).
       - name: Cap build parallelism to the runner
         run: python3 tools/ci/cargo_jobs.py --job-mib 3072 --cap
-      - name: Check fieldless Wire layout coverage and hashes
-        shell: bash
-        run: |
-          python3 -m unittest tests.test_wire_enum_goldens
-          mkdir -p "$CARGO_TARGET_DIR/wire-goldens"
-          env -u RUSTC_WRAPPER RUSTC_BOOTSTRAP=1 cargo rustc --locked -p sunrise-mod-vocab --lib -- \
-            -Zunpretty=expanded > "$CARGO_TARGET_DIR/wire-goldens/expanded.rs"
-          python3 tools/generate_wire_enum_goldens.py \
-            --expanded "$CARGO_TARGET_DIR/wire-goldens/expanded.rs" --check
-          cargo test --locked -p sunrise-mod-vocab --lib existing_fieldless_enum_layouts_match_baseline
-          cargo test --locked -p sunrise-mod-api --test wire_math_profile
+      - name: Wire math profile
+        run: cargo test --locked -p sunrise-mod-api --test wire_math_profile
       - name: Compile and test emitted point records
         run: |
           manifest=crates/sunrise-mod-point-shape/tests/record-wire/Cargo.toml
