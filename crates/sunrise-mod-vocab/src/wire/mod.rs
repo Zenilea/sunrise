@@ -1,5 +1,5 @@
 //! The wire form of the API's plain data, for the wasm boundary: values written into and read
-//! from one buffer. Native and wasm mods share the same encoding and layout identity.
+//! from one buffer. Native and wasm mods share the same encoding.
 //!
 //! Everything is little-endian and self-delimiting: a length is a `u32` before its items, an
 //! `Option` is a tag byte, an enum is a `u32` case then its fields, a record is its fields in
@@ -10,7 +10,7 @@
 //!
 //! Derive [`Wire`](crate::Wire) on types that cross a target boundary. The derive encodes
 //! fields in declaration order; checked constructors can use `#[wire(via = T)]`.
-//! Hand-written implementations must keep their layout identity consistent with their encoding.
+//! Hand-written implementations declare how they cross with `layout_fields!` or `layout_via!`.
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::hash::Hash;
 use std::sync::Arc;
@@ -554,91 +554,12 @@ impl<'a> Reader<'a> {
     }
 }
 
-/// FNV-1a hash of an encoding name, independent of its source module.
-// hidden: shared stable encoding hash primitive used by Wire derives.
-#[doc(hidden)]
-pub const fn layout_name(name: &str) -> u64 {
-    let bytes = name.as_bytes();
-    let mut hash = 0xcbf29ce484222325u64;
-    let mut i = 0;
-    while i < bytes.len() {
-        hash = (hash ^ bytes[i] as u64).wrapping_mul(0x100000001b3);
-        i += 1;
-    }
-    hash
-}
-
-/// Hash a handwritten leaf type's unqualified name.
-// hidden: normalizes macro type arguments without tying encodings to source paths.
-#[doc(hidden)]
-pub const fn layout_seed(name: &str) -> u64 {
-    let bytes = name.as_bytes();
-    let mut start = 0;
-    let mut i = 1;
-    while i < bytes.len() {
-        if bytes[i - 1] == b':' && bytes[i] == b':' {
-            start = i + 1;
-        }
-        i += 1;
-    }
-    let mut hash = 0xcbf29ce484222325u64;
-    i = start;
-    while i < bytes.len() {
-        if bytes[i] != b' ' {
-            hash = (hash ^ bytes[i] as u64).wrapping_mul(0x100000001b3);
-        }
-        i += 1;
-    }
-    hash
-}
-
-/// Compose a layout hash with a child encoding.
-// hidden: shared stable encoding hash composition used by Wire derives.
-#[doc(hidden)]
-pub const fn layout_mix(mut hash: u64, child: u64) -> u64 {
-    let bytes = child.to_le_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        hash = (hash ^ bytes[i] as u64).wrapping_mul(0x100000001b3);
-        i += 1;
-    }
-    hash
-}
-
-thread_local! {
-    /// Set while a layout walk (`resource_layout`) reaches a resource handle's encoding.
-    static RESOURCE_REACHED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-
-/// Marks the running layout walk as reaching a resource handle: what a handler's codec says
-/// from its `layout`.
-// hidden: the shared handler codec's side of `resource_layout`.
-#[doc(hidden)]
-pub fn reached_resource() {
-    RESOURCE_REACHED.set(true);
-}
-
-/// `T`'s Wire layout, and whether any part of it is a resource handle (an erased handler such
-/// as `Arc<dyn BlockPart>`): such a value crosses only as a handle into the resource scope of
-/// one link group, never as data both targets read.
-// hidden: the Part state declaration's capability check.
-#[doc(hidden)]
-pub fn resource_layout<T: Wire>() -> (u64, bool) {
-    let outer = RESOURCE_REACHED.replace(false);
-    let layout = T::layout(&mut Vec::new());
-    (layout, RESOURCE_REACHED.replace(outer))
-}
-
 /// A type with a wire form.
 #[diagnostic::on_unimplemented(
     message = "`{Self}` has no Wire form",
     label = "add #[derive(mod_api::Wire)] to it"
 )]
 pub trait Wire: Sized {
-    /// Leaf seed only; composed encoding identity comes from `layout`.
-    // hidden: leaf seed for handwritten encodings; not the composed layout identity.
-    #[doc(hidden)]
-    const LAYOUT_SEED: u64;
     /// Minimum encoded size, used to reject impossible collection lengths.
     const MIN: usize;
     /// Encodes this value, recording failures on the writer.
@@ -1065,26 +986,18 @@ impl Wire for std::time::Duration {
 
 // Checked encodings declare their written fields here rather than relying on the
 // Rust representation (which may contain caches or validated constructor state).
+// The list is read by the surface export (`surface/wire_forms.rs`) and expands to nothing.
 macro_rules! layout_fields {
-    ($($field:literal => $ty:ty),* $(,)?) => {
-    };
+    ($($field:literal => $ty:ty),* $(,)?) => {};
+}
+
+// Declares that a hand-written impl crosses as another type: read by the surface export,
+// like `layout_fields!`, and expands to nothing.
+macro_rules! layout_via {
+    ($ty:ty) => {};
 }
 
 pub(crate) use layout_fields;
-
-#[cfg(test)]
-fn hook_id_runtime_reference() -> u64 {
-    let names: &[&str] = &include!(concat!(env!("OUT_DIR"), "/hook_id_variant_names.rs"));
-    let mut hash = layout_name("HookId");
-    // Keep the independent reference as a runtime loop even in optimized tests.
-    for name in std::hint::black_box(names) {
-        hash = layout_mix(hash, layout_name(name));
-    }
-    layout_mix(layout_name("enum"), hash)
-}
-
-#[cfg(test)]
-mod fieldless_enum_goldens;
 
 #[cfg(test)]
 mod tests {
@@ -1136,132 +1049,13 @@ mod tests {
         );
         check(Tuple(7), &[7, 0, 0, 0]);
         check(Unit, &[]);
-        // Independent FNV-1a fixture: enum shape, Plain seed, First then Second.
-        // Explicit discriminants do not replace declaration-order wire tags.
-        assert_eq!(Plain::layout(&mut vec![]), 0xc2ea_ba70_1b5e_e4a0);
-        let mut visiting = vec![std::any::type_name::<Plain>()];
-        assert_eq!(Plain::layout(&mut visiting), 0x1923_c164_45af_9a57);
-        assert_eq!(visiting, [std::any::type_name::<Plain>()]);
         check(Plain::First, &[0, 0, 0, 0]);
         check(Plain::Second, &[1, 0, 0, 0]);
         check(Payload::Tuple(5), &[1, 0, 0, 0, 5]);
         check(Payload::Named { value: 7 }, &[2, 0, 0, 0, 7, 0, 0, 0]);
         check(Generic { value: 5u8 }, &[5]);
         check(Recursive { children: vec![] }, &[0, 0, 0, 0]);
-        assert_ne!(Recursive::LAYOUT_SEED, 0);
-        assert_ne!(
-            Generic::<u8>::layout(&mut vec![]),
-            Generic::<u32>::layout(&mut vec![])
-        );
     }
-    #[test]
-    fn derived_layout_handles_mutual_recursion_and_encoding_equivalence() {
-        #[derive(mod_api::Wire)]
-        struct Text {
-            content: Content,
-            children: Vec<Text>,
-        }
-        #[derive(mod_api::Wire)]
-        enum Content {
-            Literal(String),
-            Translate {
-                arguments: Vec<Text>,
-                separator: Option<Box<Text>>,
-            },
-        }
-        let mut visiting = vec![];
-        assert_ne!(Text::layout(&mut visiting), 0);
-        assert!(visiting.is_empty());
-        assert_ne!(Content::layout(&mut visiting), 0);
-        assert!(visiting.is_empty());
-        assert_eq!(
-            Vec::<u8>::layout(&mut visiting),
-            VecDeque::<u8>::layout(&mut visiting)
-        );
-        assert_eq!(
-            Vec::<u8>::layout(&mut visiting),
-            Box::<[u8]>::layout(&mut visiting)
-        );
-        assert_eq!(
-            Vec::<u8>::layout(&mut visiting),
-            Arc::<[u8]>::layout(&mut visiting)
-        );
-        assert_ne!(
-            Vec::<u8>::layout(&mut visiting),
-            Vec::<u32>::layout(&mut visiting)
-        );
-        assert_eq!(String::layout(&mut visiting), <&str>::layout(&mut visiting));
-        assert_eq!(
-            String::layout(&mut visiting),
-            Box::<str>::layout(&mut visiting)
-        );
-        assert_eq!(
-            String::layout(&mut visiting),
-            Arc::<str>::layout(&mut visiting)
-        );
-        assert_eq!(
-            String::layout(&mut visiting),
-            std::borrow::Cow::<str>::layout(&mut visiting)
-        );
-        assert_eq!(
-            u32::layout(&mut visiting),
-            Box::<u32>::layout(&mut visiting)
-        );
-        assert_eq!(
-            u32::layout(&mut visiting),
-            Arc::<u32>::layout(&mut visiting)
-        );
-        assert_eq!(
-            BTreeMap::<u8, u32>::layout(&mut visiting),
-            HashMap::<u8, u32>::layout(&mut visiting)
-        );
-    }
-
-    #[test]
-    fn recursive_layout_tracks_deep_changes_and_field_order() {
-        macro_rules! pair {
-            ($module:ident, $value:ty) => {
-                mod $module {
-                    use crate::wire::Wire;
-                    #[derive(mod_api::Wire)]
-                    struct Text {
-                        content: Content,
-                    }
-                    #[derive(mod_api::Wire)]
-                    enum Content {
-                        Child(Vec<Text>),
-                        Value($value),
-                    }
-                    pub fn hash() -> u64 {
-                        Text::layout(&mut vec![])
-                    }
-                }
-            };
-        }
-        pair!(byte, u8);
-        pair!(word, u32);
-        assert_ne!(byte::hash(), word::hash());
-        assert_eq!(byte::hash(), byte::hash());
-        macro_rules! shape {
-            ($module:ident, $($field:ident: $ty:ty),*) => {
-                mod $module {
-                    use crate::wire::Wire;
-                    #[derive(mod_api::Wire)]
-                    struct Node { $($field: $ty),* }
-                    pub fn hash() -> u64 { Node::layout(&mut vec![]) }
-                }
-            };
-        }
-        shape!(list, children: Vec<Node>);
-        shape!(optional, children: Option<Box<Node>>);
-        shape!(renamed, descendants: Vec<Node>);
-        shape!(forward, first: u8, last: u32);
-        shape!(reversed, last: u32, first: u8);
-        assert_ne!(list::hash(), optional::hash());
-        assert_ne!(list::hash(), renamed::hash());
-        assert_ne!(forward::hash(), reversed::hash());
-    }
-
     #[test]
     fn derive_field_hygiene_and_unknown_tags() {
         #[derive(mod_api::Wire, Debug, PartialEq)]
@@ -1312,7 +1106,6 @@ mod tests {
             Reader::decode::<Outer>(&[1, 0, 0, 0, 0]),
             Err(WireError::Invalid("Nonempty"))
         );
-        assert_eq!(Nonempty::layout(&mut vec![]), String::layout(&mut vec![]));
         let mut out = Writer::new();
         out.put(&Nonempty("ab".into()));
         assert_eq!(out.bytes(), &[2, 0, 0, 0, 97, 98]);
@@ -1359,19 +1152,6 @@ mod tests {
         out.clear();
         out.put_owned(Payload::Resource(Resource));
         assert_eq!(out.bytes(), &[0, 0, 0, 0, 2]);
-    }
-
-    #[test]
-    fn handwritten_seeds_do_not_depend_on_source_paths() {
-        assert_eq!(
-            layout_seed("Identifier"),
-            layout_seed("crate::text::Identifier")
-        );
-        assert_eq!(
-            layout_seed("Identifier"),
-            layout_seed("other :: Identifier")
-        );
-        assert_ne!(layout_seed("Identifier"), layout_seed("LevelKey"));
     }
 
     #[test]

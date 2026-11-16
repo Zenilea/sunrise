@@ -438,37 +438,7 @@ fn snapshot_and_reload_records_have_declared_field_bytes() {
 fn decode<T: Wire, F: Wire>(value: T) -> F {
     let mut out = Writer::new();
     out.put(&value);
-    let declared = T::__field_layouts().expect("compound codec must declare its fields");
-    let expected = F::__tuple_layouts().expect("expected fields must be a tuple");
-    let actual = if declared.first().is_some_and(|(name, _)| *name == "tag") {
-        let tag_layout = declared[0].1;
-        let mut reader = Reader::new(out.bytes());
-        let tag = if tag_layout == u8::layout(&mut Vec::new()) {
-            u32::from(reader.take::<u8>().unwrap())
-        } else {
-            assert_eq!(
-                tag_layout,
-                u32::layout(&mut Vec::new()),
-                "unsupported enum tag width"
-            );
-            reader.take::<u32>().unwrap()
-        };
-        let prefix = format!("{tag}:");
-        let unit = <()>::layout(&mut Vec::new());
-        std::iter::once(tag_layout)
-            .chain(declared.iter().skip(1).filter_map(|(name, layout)| {
-                (name.starts_with(&prefix) && *layout != unit).then_some(*layout)
-            }))
-            .collect::<Vec<_>>()
-    } else {
-        declared.into_iter().map(|(_, layout)| layout).collect()
-    };
-    assert_eq!(
-        actual,
-        expected,
-        "{} field schema differs from the independently typed expected tuple",
-        std::any::type_name::<T>()
-    );
+    // Decoding as the independently typed tuple must consume exactly the encoded bytes.
     Reader::decode::<F>(out.bytes()).unwrap()
 }
 
@@ -750,7 +720,7 @@ fn remaining_enum_payload_fields_keep_tags_and_widths() {
 }
 
 #[test]
-fn newtype_widths_and_unit_enum_tags_match_their_layouts() {
+fn newtype_widths_and_unit_enum_tags_match_their_encodings() {
     let _keys = Keys::new();
     fields(BlockKey::from_slot(0).unwrap(), (0u32,));
     fields(ItemKey::from_slot(0).unwrap(), (0u32,));

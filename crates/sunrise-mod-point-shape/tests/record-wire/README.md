@@ -13,10 +13,9 @@ CARGO_INCREMENTAL=0 CARGO_TARGET_DIR="$PWD/target" cargo test --manifest-path cr
 CARGO_INCREMENTAL=0 CARGO_TARGET_DIR="$PWD/target" cargo check --manifest-path crates/sunrise-mod-point-shape/tests/record-wire/Cargo.toml --features wasm-guest --target wasm32-unknown-unknown
 ```
 
-The three tests cover independent expected bytes and round-trip behavior,
+The tests cover independent expected bytes and round-trip behavior,
 listener replacement of text, every truncated prefix, invalid nested bool and
-outcome tags, trailing bytes, and a changed grandchild encoding propagating to
-the emitted record's runtime layout while its leaf seed stays identical.
+outcome tags and trailing bytes.
 
 A separate workspace avoids a dependency cycle: the API generator depends on
 point-shape, while this proof depends on the API and builds through point-shape.

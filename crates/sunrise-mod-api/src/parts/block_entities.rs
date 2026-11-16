@@ -457,7 +457,7 @@ impl PartRegistrar {
         declaration
             .check(self.mod_wasm)
             .and_then(|()| match self.part_states.get(&key) {
-                Some(&(layout, declared)) if layout != declaration.layout => {
+                Some(&declared) if declared != declaration.data_name => {
                     Err(crate::PartStateRefusal::Incompatible { declared })
                 }
                 _ => Ok(()),
@@ -465,7 +465,7 @@ impl PartRegistrar {
         self.attachment_uses
             .push((self.mod_id.into(), key.0.into(), key.1.into()));
         self.part_states
-            .insert(key, (declaration.layout, declaration.data_name));
+            .insert(key, declaration.data_name);
         Ok(())
     }
 }

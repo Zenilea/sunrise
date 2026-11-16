@@ -266,32 +266,24 @@ pub struct PartStateDeclaration {
     pub namespace: &'static str,
     /// The state's name.
     pub name: &'static str,
-    /// The state type's Wire layout: its schema across the native and wasm boundary, which two
-    /// declarations of one key must share.
-    pub layout: u64,
-    /// Its name, for a refusal.
+    /// The state type's name, which two declarations of one key must share, and a refusal names.
     pub data_name: &'static str,
     sync: bool,
     copy_on_death: bool,
     codec: bool,
-    /// Whether the type's Wire form holds a resource handle anywhere in it.
-    resource: bool,
 }
 
 impl PartStateDeclaration {
     /// The declaration of `key`: what the typed declaration is erased to, the same on both
     /// targets.
     pub fn of<T: crate::wire::Wire + 'static>(key: &AttachmentType<T>) -> Self {
-        let (layout, resource) = crate::wire::resource_layout::<T>();
         Self {
             namespace: key.namespace,
             name: key.name,
-            layout,
             data_name: std::any::type_name::<T>(),
             sync: key.sync,
             copy_on_death: key.copy_on_death,
             codec: key.codec.is_some(),
-            resource,
         }
     }
 
@@ -304,9 +296,6 @@ impl PartStateDeclaration {
         }
         if self.copy_on_death {
             return Err(PartStateRefusal::CopyOnDeath);
-        }
-        if self.resource {
-            return Err(PartStateRefusal::ResourceHandle);
         }
         if wasm && !self.codec {
             return Err(PartStateRefusal::NoCodecOnWasm);
@@ -512,7 +501,7 @@ mod tests {
     }
 
     #[test]
-    fn declarations_refuse_sync_copy_on_death_handles_and_codec_less_wasm_state() {
+    fn declarations_refuse_sync_copy_on_death_and_codec_less_wasm_state() {
         let check = |key: &AttachmentType<i32>, wasm| PartStateDeclaration::of(key).check(wasm);
         assert_eq!(check(&key(false, false, true), true), Ok(()));
         assert_eq!(check(&key(false, false, false), false), Ok(()));
@@ -528,22 +517,6 @@ mod tests {
             check(&key(false, true, true), false),
             Err(PartStateRefusal::CopyOnDeath)
         );
-        // A handle anywhere in the type, however deep, on either target.
-        type Held = Option<Vec<(u8, Arc<dyn crate::BlockPart>)>>;
-        static HELD: AttachmentType<Held> = AttachmentType {
-            namespace: "test",
-            name: "held",
-            default: || None,
-            codec: None,
-            copy_on_death: false,
-            sync: false,
-        };
-        for wasm in [false, true] {
-            assert_eq!(
-                PartStateDeclaration::of(&HELD).check(wasm),
-                Err(PartStateRefusal::ResourceHandle)
-            );
-        }
     }
 
     #[test]

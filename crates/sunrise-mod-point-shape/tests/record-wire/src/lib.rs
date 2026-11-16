@@ -4,7 +4,7 @@ include!(concat!(env!("OUT_DIR"), "/records.rs"));
 
 #[cfg(test)]
 mod tests {
-    use super::{changed, original};
+    use super::original;
 
     /// The mod's hooks, which `wasm-guest` declares and `#[mod_api::sunrise_mod]` defines in a real mod. The
     /// native test binary needs a definition too: MSVC's linker refuses the unresolved symbol even though nothing
@@ -82,27 +82,5 @@ mod tests {
             Reader::decode::<original::ProofArgs<'_>>(&trailing),
             Err(WireError::Trailing)
         ));
-    }
-
-    #[test]
-    fn emitted_layout_tracks_transitive_field_encoding() {
-        // Names, record signature, field order and outcome stay identical;
-        // only Child.value changes bool -> u32 in the build script.
-        assert_eq!(
-            original::ProofArgs::LAYOUT_SEED,
-            changed::ProofArgs::LAYOUT_SEED
-        );
-        assert_ne!(
-            original::Child::layout(&mut vec![]),
-            changed::Child::layout(&mut vec![])
-        );
-        assert_ne!(
-            original::Nested::layout(&mut vec![]),
-            changed::Nested::layout(&mut vec![])
-        );
-        assert_ne!(
-            original::ProofArgs::layout(&mut vec![]),
-            changed::ProofArgs::layout(&mut vec![])
-        );
     }
 }

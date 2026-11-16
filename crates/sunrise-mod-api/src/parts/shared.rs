@@ -90,7 +90,7 @@ pub struct PartRegistrar {
     pub(crate) biome_sources: Vec<BiomeSourceInfo>,
     pub(crate) refused: Vec<String>,
     /// The Part state keys this mod declared, with their types' Wire layouts and names.
-    pub(crate) part_states: HashMap<(&'static str, &'static str), (u64, &'static str)>,
+    pub(crate) part_states: HashMap<(&'static str, &'static str), &'static str>,
 }
 
 impl PartRegistrar {
