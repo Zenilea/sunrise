@@ -46,7 +46,6 @@ impl VanillaServerListeners {
 /// filesystem paths. Its fields are private so the view can grow.
 // exhaustive: its fields are private, so mods cannot build or destructure it
 #[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 pub struct ServerReloadContext {
     pub(crate) files: ReloadFiles,
 }

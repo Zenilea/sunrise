@@ -14,7 +14,6 @@ use crate::ServerHost;
 /// past its closure cannot write outside the journal.
 // exhaustive: its field is private, so mods cannot build or destructure it
 #[derive(Debug, PartialEq, Eq, sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 pub struct Transaction(pub(crate) u64);
 
 /// What ends a transaction:
@@ -38,7 +37,6 @@ pub struct Transaction(pub(crate) u64);
 /// ```
 // exhaustive: its fields are private, so mods cannot build or destructure it
 #[derive(Debug, PartialEq, Eq, sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 pub struct TransactionSeal {
     pub(crate) tx: Transaction,
     pub(crate) close: u64,

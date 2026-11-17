@@ -153,7 +153,6 @@ impl std::error::Error for PartStateError {}
 
 /// Why a Part's state declaration was refused at registration.
 #[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum PartStateRefusal {
@@ -207,7 +206,6 @@ impl PartStateRefusal {
 
 /// A Part with state could not be attached.
 #[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum BlockEntityStateError {
@@ -261,7 +259,6 @@ impl From<BlockEntityPartError> for BlockEntityStateError {
 
 /// One Part state declaration, as the registrar checks it.
 #[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct PartStateDeclaration {

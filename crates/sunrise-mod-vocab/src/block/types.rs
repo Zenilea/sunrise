@@ -269,7 +269,6 @@ pub enum SupportType {
 /// position. In-place data edits and temporary tick take/put preserve identity.
 /// Stale handles read as `None`; Result-returning methods report `Stale`.
 #[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct BlockEntityRef {

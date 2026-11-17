@@ -31,7 +31,6 @@ pub enum ColorResolver {
 /// A mod's colour resolver, as the game keeps it: what [`ColorResolvers::register`] returns, to
 /// pass to [`BlockAndTintGetter::block_tint`]. Process-local; do not persist it.
 #[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub struct ModColorResolver(pub(crate) u32);

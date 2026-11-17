@@ -221,7 +221,6 @@ pub struct ExplosionStart<'a> {
 
 /// One server world open or client level; it rejects a previous world's handles.
 #[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct WorldEpoch(pub(crate) u64);
@@ -243,7 +242,6 @@ impl WorldEpoch {
 /// (`minecraft:the_nether`) and the block. The dimension is data, so it need
 /// not be open; `host.level(&pos.dimension().to_string())` gives its level when it is.
 #[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct GlobalPos {
@@ -293,7 +291,6 @@ pub struct PlayerRespawnConfig {
 /// A level of the open world, by its dimension (`minecraft:the_nether`).
 /// `Host::level` makes one, and `entity.level(host)` gives an entity's.
 #[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct LevelRef {
@@ -363,7 +360,6 @@ impl LevelRef {
 /// A mod-owned watered area in one server level. Created by [`LevelRef::add_water_ticket`].
 /// Explicit removal, owner disable and level unload invalidate it. Never saved.
 #[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct WaterTicket {
@@ -397,7 +393,6 @@ impl WaterTicket {
 /// for a handle of an earlier open, for a closed level, and on a client.
 /// Reads and writes reach parked server levels without moving them into place.
 #[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct RaidRef {
@@ -440,7 +435,6 @@ pub enum RaidStatus {
 /// A chunk position in an open level. A handle may be kept after unloading;
 /// reads resolve it again, returning `false` or `None` when it is no longer loaded.
 #[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ChunkRef {
@@ -1102,7 +1096,6 @@ pub struct EntityRayHit {
 
 /// Non-paused authoritative server ticks since open (not game or frame time).
 #[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct TickId(pub(crate) u64);
@@ -1718,7 +1711,6 @@ pub enum GameRuleReadError {
 /// open reads as stale: reads answer `None` or [`ObjectiveError::Stale`] and writes change
 /// nothing.
 #[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ObjectiveRef {
@@ -1731,7 +1723,6 @@ pub struct ObjectiveRef {
 /// removed (even if its name was added again) or a handle from an earlier open reads as stale:
 /// reads answer `None` or [`TeamError::Stale`] and writes change nothing.
 #[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct TeamRef {

@@ -636,7 +636,6 @@ impl SoundPlay {
 /// it plays (stop it before starting another in its place), or nothing can stop it until the
 /// player leaves the level.
 #[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its field is private, so mods cannot build or destructure it
 pub struct SoundRef {
@@ -1074,7 +1073,6 @@ pub enum CrosshairTarget {
 /// earlier open reads as `None` and changes nothing. Mob and raid bars are not
 /// custom boss events and have no handle.
 #[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct BossBarRef {
@@ -1219,7 +1217,6 @@ pub struct ClientBossBar {
 /// }
 /// ```
 #[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct MenuRef {

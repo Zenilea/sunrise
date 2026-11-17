@@ -57,10 +57,7 @@ pub(super) fn take<T: serde::de::DeserializeOwned>(input: &mut Reader<'_>) -> Re
 
 impl Wire for crate::ModelPart {
     const MIN: usize = String::MIN;
-    const LAYOUT_SEED: u64 = String::LAYOUT_SEED;
-    fn layout(visiting: &mut Vec<&'static str>) -> u64 {
-        String::layout(visiting)
-    }
+    layout_via!(String);
     fn put(&self, out: &mut Writer) {
         let mut pending = vec![(self, 0u16)];
         while let Some((part, depth)) = pending.pop() {

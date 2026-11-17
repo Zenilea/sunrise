@@ -138,10 +138,6 @@ macro_rules! token {
         /// The token's own claim; the value type is only its parameter. Reading one as `T`
         /// (the only way to retype a token) walks `T`'s schema once.
         impl<T: PayloadCodec + 'static> Wire for $name<T> {
-            const LAYOUT_SEED: u64 = crate::wire::layout_mix(
-                crate::wire::layout_name(stringify!($name)),
-                <PayloadToken as Wire>::LAYOUT_SEED,
-            );
             crate::wire::layout_fields!("token" => PayloadToken);
             const MIN: usize = <PayloadToken as Wire>::MIN;
             fn put(&self, out: &mut Writer) {

@@ -668,7 +668,6 @@ fn walk_timing(walk_pos: f32, walk_speed: f32, speed_factor: f32, scale_factor: 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 // exhaustive: its field is private; it changes through vanilla's transitions
 #[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 pub struct AnimationState {
     pub(crate) start_tick: i32,
 }

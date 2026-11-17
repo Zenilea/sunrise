@@ -139,7 +139,6 @@ pub struct EntityUuid(pub u128);
 /// handle from an event's entity id; `ClientHost::crosshair_target` supplies a
 /// client handle for an entity hit.
 #[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct EntityRef {
@@ -201,7 +200,6 @@ pub enum LeashHolder {
 /// entity's methods work on it too. Stale handles read as `None`, as an
 /// `EntityRef`'s do.
 #[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct LivingRef(pub(crate) EntityRef);
@@ -346,7 +344,6 @@ pub enum EffectApplicable {
 
 /// A vanilla `Mob`, narrowed from an entity with `host.mob(entity)`.
 #[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct MobRef(pub(crate) EntityRef);
@@ -378,7 +375,6 @@ impl MobRef {
 /// edits. Every read and edit after the hook returns, or with another lend's handle,
 /// is refused with [`UnspawnedMobError::Expired`], so a copy kept past the call changes nothing.
 #[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct UnspawnedMobRef {
@@ -617,7 +613,6 @@ impl GoalSpec {
 
 /// One goal of a mob's selector, as `goals` and `target_goals` read it.
 #[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 // exhaustive: the game builds it with a literal; mods only read it
 pub struct MobGoalEntry {
@@ -632,7 +627,6 @@ pub struct MobGoalEntry {
 /// The ender dragon of the open world, narrowed with `host.dragon(entity)`.
 /// It is also a [`MobRef`] and a [`LivingRef`].
 #[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct DragonRef(pub(crate) EntityRef);
@@ -713,7 +707,6 @@ impl DragonPhase {
 
 /// A dropped item entity of the open world, narrowed with `host.item_entity`.
 #[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ItemEntityRef(pub(crate) EntityRef);
@@ -734,7 +727,6 @@ impl ItemEntityRef {
 /// A display entity of the open world (`block_display`, `item_display` or
 /// `text_display`), narrowed with `host.display`.
 #[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct DisplayRef(pub(crate) EntityRef);
@@ -757,7 +749,6 @@ impl DisplayRef {
 /// thrown items, fireballs, wind charges, skulls, shulker bullets and mods'
 /// thrown types.
 #[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ProjectileRef(pub(crate) EntityRef);
@@ -779,7 +770,6 @@ impl ProjectileRef {
 /// from an entity with `host.fishing_hook(entity)`. It does not narrow to a
 /// [`ProjectileRef`]: a hook's owner is always the player who cast it.
 #[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct FishingHookRef(pub(crate) EntityRef);
@@ -824,7 +814,6 @@ pub struct FishingMedium {
 /// profession is unresolved, offers read empty and merchant mutations are
 /// refused until its profession is available again; saved offers are retained.
 #[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct MerchantRef(pub(crate) EntityRef);
@@ -1037,7 +1026,6 @@ impl NoBackend for HotbarSlotError {
 
 /// A vanilla `AbstractMinecart`, narrowed from an entity with `host.minecart(entity)`.
 #[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct MinecartRef(pub(crate) EntityRef);
@@ -1147,7 +1135,6 @@ pub enum RemovalReason {
 /// A nested guest turn cannot re-enter a player active in an outer turn;
 /// operations requiring that player's swapped state report them unavailable.
 #[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct PlayerRef {
@@ -1176,7 +1163,6 @@ impl From<PlayerRef> for EntityRef {
 /// this is deliberately not a live player or entity handle.
 // exhaustive: its field is private, so mods cannot build or destructure it
 #[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct OriginalPlayerRef {
     pub(crate) token: u64,

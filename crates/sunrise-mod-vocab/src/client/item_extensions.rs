@@ -18,7 +18,6 @@ pub enum EquipmentLayerType {
 /// A model baked from a registered ModelPart tree on this resource load.
 /// References from a previous load fall back to the vanilla model, with one diagnostic.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 // exhaustive: only the engine constructs resource-load references
 pub struct ArmorModelRef {
     generation: u64,
@@ -47,7 +46,6 @@ impl ArmorModelRef {
 /// A texture resolved against this resource load's atlas.
 /// A stale reference falls back to the supplied vanilla/CIT texture, with one diagnostic.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 // exhaustive: only the engine constructs resource-load references
 pub struct ArmorTextureRef {
     generation: u64,

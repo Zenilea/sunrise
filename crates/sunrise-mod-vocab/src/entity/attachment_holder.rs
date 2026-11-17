@@ -9,7 +9,6 @@ use crate::{BlockEntityRef, ChunkRef, EntityRef, LevelRef, PlayerRef};
 /// identity: a removed entity, unloaded chunk or closed world may no longer resolve.
 /// Copying the identity never extends the holder's lifetime.
 #[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum AttachmentHolder {

@@ -4,10 +4,7 @@ use crate::text::{Text, TextForm};
 
 impl Wire for Text {
     const MIN: usize = TextForm::MIN;
-    const LAYOUT_SEED: u64 = TextForm::LAYOUT_SEED;
-    fn layout(visiting: &mut Vec<&'static str>) -> u64 {
-        TextForm::layout(visiting)
-    }
+    layout_via!(TextForm);
     fn put(&self, out: &mut Writer) {
         match TextForm::try_from(self) {
             Ok(form) => out.put(&form),

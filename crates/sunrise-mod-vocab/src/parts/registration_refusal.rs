@@ -19,7 +19,6 @@ pub const MAX_LOADING_WARNINGS: usize = 16;
 /// A loading message as a translation key and its arguments, resolved against the
 /// selected language when the game shows it (NeoForge's `ModLoadingIssue`).
 #[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct LoadingMessage {

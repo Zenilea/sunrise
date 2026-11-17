@@ -78,7 +78,6 @@ impl DamageValues {
 }
 /// A plain snapshot of one hit. Sequencing and normalization remain owned by the game.
 #[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: its wrapped values are private; mods use constructors and accessors
 pub struct DamageContainer(DamageValues);

@@ -37,7 +37,6 @@ pub struct ModBlockEntityFields {
 /// this may cause one extra client redraw even though the fields were retained.
 /// Neither saved nor compared.
 #[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ModRevision {

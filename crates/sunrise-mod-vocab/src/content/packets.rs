@@ -85,7 +85,6 @@ pub enum SendPacketError {
 
 /// Opaque identity of one connection's packet hold.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 // exhaustive: the private field prevents mods constructing or destructuring the id
 pub struct HoldId(pub(crate) u64);
 impl HoldId {
