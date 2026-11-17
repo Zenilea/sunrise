@@ -113,7 +113,7 @@ static PARTIAL: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize:
 /// the folder there; false when `to` was prepared meanwhile.
 fn copy_prepared(from: &Path, to: &Path) -> std::io::Result<bool> {
     // Without the data file: it names its own root, so a copy of it could not be read.
-    let data_file = from.join(sunrise_platform::prepared_files::FILE_NAME);
+    let data_file = from.join(crate::preparer::DATA_FILE);
     let version = to.file_name().unwrap_or_default().to_string_lossy();
     let partial = to.with_file_name(format!(
         ".{version}.partial-{}-{}",
@@ -479,7 +479,7 @@ mod tests {
         fs::write(root.join("registries.json"), table).unwrap();
         fs::write(root.join("assets/minecraft/sounds.json"), "sounds").unwrap();
         fs::write(
-            root.join(sunrise_platform::prepared_files::FILE_NAME),
+            root.join(crate::preparer::DATA_FILE),
             root.display().to_string(),
         )
         .unwrap();
@@ -508,18 +508,14 @@ mod tests {
             "sounds"
         );
         // The data file names its own root, so the base writes its own (the game does it on start).
-        assert!(!to
-            .join(sunrise_platform::prepared_files::FILE_NAME)
-            .exists());
+        assert!(!to.join(crate::preparer::DATA_FILE).exists());
         // A copy, not a link: preparing the base again rewrites its files only.
         fs::write(to.join("registries.json"), "reprepared").unwrap();
         assert_eq!(
             fs::read_to_string(from.join("registries.json")).unwrap(),
             "checkout tables"
         );
-        assert!(from
-            .join(sunrise_platform::prepared_files::FILE_NAME)
-            .exists());
+        assert!(from.join(crate::preparer::DATA_FILE).exists());
     }
     #[test]
     fn resources_the_base_gained_meanwhile_are_left_alone() {

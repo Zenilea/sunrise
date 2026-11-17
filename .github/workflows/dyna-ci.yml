@@ -819,6 +819,11 @@ jobs:
         id: ignored_test_policy_files_read_cleanly
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: python3 tools/ci/check_ignored_test_rows.py
+      # The launcher split's gate (drafts plan B7): no manifest path, include or #[path] module leaves launcher/.
+      - name: The launcher builds from its own files
+        id: the_launcher_builds_from_its_own_files
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: python3 tools/ci/check_launcher_standalone.py
       # The unit tier: a test that boots the game is #[ignore = "daily"]; the fixtures are in tools/ci/game-boot-fixtures.txt.
       - name: Game-boot tests are daily tests
         id: game_boot_tests_are_daily_tests

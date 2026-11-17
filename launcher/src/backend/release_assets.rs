@@ -1,6 +1,6 @@
 /// The release assets of each system Sunrise ships for: (OS, architecture, the game, the launcher).
 /// game-build.yml builds the game's, nightly-build.yml signs and publishes them, and launcher.yml
-/// builds the launcher's (`platform_assets_are_published`).
+/// builds the launcher's (`platform_assets_are_published`; tests/test_launcher_release_assets.py for the game's).
 pub const PLATFORMS: [(&str, &str, &str, &str); 5] = [
     (
         "linux",

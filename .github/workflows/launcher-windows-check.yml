@@ -55,12 +55,15 @@ jobs:
       # self-update switch and development overrides, which no test reaches), and debug adds overflow checks.
       - run: "cargo test --no-fail-fast --locked -p sunrise-mod-package --features runtime-process --lib output::"
         working-directory: .
+      # sunrise-server-files' durable write on Windows (it was launcher/tests/durable_publication.rs's include).
+      - run: "cargo test --no-fail-fast --locked -p sunrise-server-files --lib durable::"
+        working-directory: .
       # The smod crate's Windows-only holder test runs this example as its actor.
       - run: cargo build --locked -p sunrise-launcher-smod --example holder_actor
       # The library, the binary's own tests, the docs, and the tests/ targets that start no process.
       # Targets that start the debug launcher binary run in the daily launcher-processes job.
       - run: >-
-          cargo test --no-fail-fast --locked --lib --bins --test developer_install --test durable_publication
+          cargo test --no-fail-fast --locked --lib --bins --test developer_install
           --test modpack_headline --test storage_consent
       - run: cargo test --no-fail-fast --locked --doc
 
