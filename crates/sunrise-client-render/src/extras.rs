@@ -8,8 +8,6 @@ use std::{collections::VecDeque, fs, path::Path};
 pub const FILE: &str = "sunrise-extras.txt";
 /// The name the options screen uses while the sort key waits for a key.
 pub const SORT_KEY: &str = "sunrise.sort";
-/// The 3D skin layers line, here and in the `options.txt` that held it first.
-const SKIN_LAYERS_KEY: &str = "threeDSkinLayers";
 
 /// The minimap's sizes in GUI pixels, and its zooms in blocks per pixel.
 pub const MINIMAP_SIZES: [(u8, &str); 3] = [(64, "Small"), (96, "Medium"), (128, "Large")];
@@ -121,10 +119,6 @@ pub struct Extras {
     /// built-in track and leaving the off ones out (`musicPage`, off by
     /// default: vanilla plays exactly as before).
     pub music_page: bool,
-    /// 3D skin layers (`threeDSkinLayers`, Options → Skin Customization): each
-    /// painted texel of a player's outer layer drawn as a slab
-    /// (`sunrise_client::mobs::skin_layers`).
-    pub three_d_skin_layers: bool,
     /// The PvP & HUD page's options (`pvp`).
     pub pvp: crate::pvp::Pvp,
 }
@@ -175,7 +169,6 @@ impl Default for Extras {
             wheel_cycles_settings: false,
             music_off: Vec::new(),
             music_page: false,
-            three_d_skin_layers: false,
             pvp: Default::default(),
         }
     }
@@ -281,7 +274,6 @@ impl Extras {
                         .collect()
                 }
                 "musicPage" => e.music_page = flag(e.music_page),
-                SKIN_LAYERS_KEY => e.three_d_skin_layers = flag(e.three_d_skin_layers),
                 key => {
                     e.pvp.parse_line(key, value);
                 }
@@ -291,7 +283,7 @@ impl Extras {
     }
     pub fn serialize(&self) -> String {
         let mut text = format!(
-            "packBrowser:{}\npregen:{}\nfullbright:{}\ndynamicLights:{}\nzoom:{}\nzoomKey:{}\nzoomLevel:{}\nzoomSmooth:{}\nzoomSensitivity:{}\nlodZoomDetail:{}\nfps:{}\nfpsCorner:{}\nfpsLows:{}\nkeystrokes:{}\nkeystrokesCorner:{}\nkeystrokesCps:{}\nmovedToMods:{}\nminimap:{}\nminimapCorner:{}\nminimapSize:{}\nminimapShape:{}\nminimapZoom:{}\nminimapRotate:{}\nautoReconnect:{}\nuiSoundReserve:{}\nownNameTag:{}\nskipModdedSplashesIfVanillaModified:{}\nhideBlockParticles:{}\nmouseTweaks:{}\nmouseTweaksWheel:{}\nsort:{}\nsortKey:{}\nchatAnimation:{}\nchatIndicator:{}\n{}:{}\nagentControl:{}\nreproKeys:{}\nsplitscreen:{}\nsplitscreenTwo:{}\nsplitscreenThree:{}\nsplitscreenNames:{}\nwheelCyclesListSettings:{}\nmusicOff:{}\nmusicPage:{}\n{}:{}\n",
+            "packBrowser:{}\npregen:{}\nfullbright:{}\ndynamicLights:{}\nzoom:{}\nzoomKey:{}\nzoomLevel:{}\nzoomSmooth:{}\nzoomSensitivity:{}\nlodZoomDetail:{}\nfps:{}\nfpsCorner:{}\nfpsLows:{}\nkeystrokes:{}\nkeystrokesCorner:{}\nkeystrokesCps:{}\nmovedToMods:{}\nminimap:{}\nminimapCorner:{}\nminimapSize:{}\nminimapShape:{}\nminimapZoom:{}\nminimapRotate:{}\nautoReconnect:{}\nuiSoundReserve:{}\nownNameTag:{}\nskipModdedSplashesIfVanillaModified:{}\nhideBlockParticles:{}\nmouseTweaks:{}\nmouseTweaksWheel:{}\nsort:{}\nsortKey:{}\nchatAnimation:{}\nchatIndicator:{}\n{}:{}\nagentControl:{}\nreproKeys:{}\nsplitscreen:{}\nsplitscreenTwo:{}\nsplitscreenThree:{}\nsplitscreenNames:{}\nwheelCyclesListSettings:{}\nmusicOff:{}\nmusicPage:{}\n",
             bool_text(self.pack_browser),
             bool_text(self.pregen),
             bool_text(self.fullbright),
@@ -341,29 +333,9 @@ impl Extras {
             bool_text(self.wheel_cycles_settings),
             self.music_off.join(","),
             bool_text(self.music_page),
-            SKIN_LAYERS_KEY,
-            bool_text(self.three_d_skin_layers),
         );
         self.pvp.serialize(&mut text);
         text
-    }
-    /// Adopts the settings `options.txt` held before they moved here, while
-    /// this file (`own`) has no line of its own: 3D skin layers were an
-    /// `options.txt` line. Vanilla's `Options.save` drops lines it doesn't
-    /// know, so it is read there once, the first start after the update.
-    pub fn read_old_options(&mut self, own: &str, options_txt: &str) {
-        fn line<'a>(text: &'a str, name: &str) -> Option<&'a str> {
-            text.lines().find_map(|l| {
-                l.split_once(':')
-                    .filter(|(key, _)| *key == name)
-                    .map(|(_, value)| value)
-            })
-        }
-        if line(own, SKIN_LAYERS_KEY).is_none()
-            && let Some(value) = line(options_txt, SKIN_LAYERS_KEY)
-        {
-            self.three_d_skin_layers = value == "true";
-        }
     }
     /// Binds the extra key `name` (`SORT_KEY`); false for
     /// another name (a vanilla mapping).

@@ -3,7 +3,6 @@
   "sunrise.extras.pregen": "สร้างก้อนล่วงหน้า",
   "sunrise.extras.pregen.tooltip": "เปิดใช้ /pregen ในโลกผู้เล่นเดี่ยวและโลก LAN ของคุณ เมื่อเปิดใช้การโกง ให้ใช้ /pregen start เพื่อสร้างพื้นที่ก่อนสำรวจ ไม่เปิดใช้คำสั่งบนเซิร์ฟเวอร์ที่คุณเข้าร่วม",
   "sunrise.options.controller": "คอนโทรลเลอร์",
-  "sunrise.options.three_d_skin_layers": "ชั้นสกิน 3D",
   "sunrise.options.vibration": "การสั่นสะเทือน",
   "sunrise.options.play_in_background": "เล่นเบื้องหลัง",
   "sunrise.options.adaptive_triggers": "ทริกเกอร์แบบปรับตัว",
