@@ -878,10 +878,15 @@ fn fetch_datapack_from(
     Ok((path, v.version.clone()))
 }
 
-/// A project's newest version for this game that wasn't taken down.
+/// A project's newest version for this game that wasn't taken down and asks for no capability this
+/// build doesn't know: the choice [`Index::installable`] makes for the game's browser and auto-update.
 fn newest<'a>(index: &Index, p: &'a index::Project) -> Result<&'a index::Version, String> {
     let mut taken_down = None;
-    for v in p.versions.iter().filter(|v| v.game == GAME) {
+    for v in p
+        .versions
+        .iter()
+        .filter(|v| v.game == GAME && v.capabilities.unknown().is_empty())
+    {
         if let Some(r) = index.revoked(&p.id, &v.file.sha256) {
             taken_down.get_or_insert(r);
         } else {

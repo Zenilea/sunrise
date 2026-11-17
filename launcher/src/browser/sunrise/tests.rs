@@ -680,6 +680,28 @@ fn a_project_made_for_the_earlier_mod_system_says_it_cant_be_installed() {
 }
 
 #[test]
+fn install_takes_the_newest_version_this_build_can_install() {
+    let mut index = sample();
+    let hud = index
+        .projects
+        .iter_mut()
+        .find(|p| p.id == "coords_hud")
+        .unwrap();
+    hud.versions[0].game = GAME.into();
+    hud.versions[0].capabilities = Default::default();
+    // A newer version that asks for a capability this build does not know.
+    let mut newer = hud.versions[0].clone();
+    newer.version = "9.0.0".into();
+    newer.capabilities = vec!["game-read".to_string()].into();
+    hud.versions.insert(0, newer);
+    let p = index.project("coords_hud").unwrap();
+    // The in-game browser and auto-update choose by this rule; Install must too, or it downloads a
+    // version the launcher's own check then refuses.
+    assert_eq!(index.installable(p, GAME).unwrap().version, "0.1.0");
+    assert_eq!(newest(&index, p).unwrap().version, "0.1.0");
+}
+
+#[test]
 fn a_summary_the_registry_cut_mid_word_ends_on_a_whole_word() {
     let cut = format!("{} and tools at the crafti", "x".repeat(SUMMARY_CUT - 24));
     assert_eq!(cut.chars().count(), SUMMARY_CUT);
