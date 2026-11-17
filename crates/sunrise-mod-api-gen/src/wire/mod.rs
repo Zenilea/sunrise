@@ -893,7 +893,7 @@ pub(crate) fn owned_types(
     let mut with_providers = included.to_vec();
     with_providers.push(("capability_providers_generated.rs", providers.as_str()));
     let mut surface = surface(root, &with_providers)?;
-    // Every owned signature def appears in generated WIRE_LAYOUT with a Wire bound.
+    // Every owned signature def appears in the generated wire code with a Wire bound.
     // That compile-time guarantee covers macro-generated slot keys/handle codecs too;
     // no owned field traversal or second Wire-implementation discovery is needed.
     let mut clones = std::collections::HashSet::new();
