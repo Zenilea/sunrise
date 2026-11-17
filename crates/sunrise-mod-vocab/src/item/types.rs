@@ -370,8 +370,7 @@ impl ItemAttributeModifier {
 /// edits them (`ItemAttributeModifierEvent`'s list). It starts as the
 /// stack's own `minecraft:attribute_modifiers`, or its item's, in order.
 // exhaustive: its fields are private, so mods only edit it through its methods
-#[derive(sunrise_mod_api_macros::Wire)]
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Debug, Default, PartialEq)]
 pub struct ItemAttributeModifiers {
     pub(crate) entries: Vec<ItemAttributeModifier>,
     pub(crate) changed: bool,
@@ -462,8 +461,7 @@ impl ItemAttributeModifiers {
 /// (`minecraft:sharpness`) with its level, in order. Private fields, edited
 /// through methods, so the game knows whether a mod changed them.
 // exhaustive: its fields are private, so mods only edit it through its methods
-#[derive(sunrise_mod_api_macros::Wire)]
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Debug, Default, PartialEq, Eq)]
 pub struct ItemEnchantments {
     pub(crate) entries: Vec<(Identifier, u32)>,
     pub(crate) changed: bool,

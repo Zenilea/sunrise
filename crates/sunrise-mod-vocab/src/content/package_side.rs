@@ -1,6 +1,15 @@
 /// Which installations must carry a package, not the executing host's side.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    sunrise_mod_api_macros::Wire,
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
 pub enum Side {

@@ -36,8 +36,7 @@ pub struct ModBlockEntityFields {
 /// Rejected callback writebacks also advance the engine revision to invalidate stale copies;
 /// this may cause one extra client redraw even though the fields were retained.
 /// Neither saved nor compared.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ModRevision {
     pub(crate) born: u64,

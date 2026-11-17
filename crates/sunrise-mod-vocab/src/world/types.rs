@@ -220,8 +220,7 @@ pub struct ExplosionStart<'a> {
 }
 
 /// One server world open or client level; it rejects a previous world's handles.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct WorldEpoch(pub(crate) u64);
 
@@ -241,8 +240,7 @@ impl WorldEpoch {
 /// A block in a dimension, vanilla's `GlobalPos`: the dimension's key
 /// (`minecraft:the_nether`) and the block. The dimension is data, so it need
 /// not be open; `host.level(&pos.dimension().to_string())` gives its level when it is.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Debug, PartialEq, Eq)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct GlobalPos {
     pub(crate) dimension: Identifier,
@@ -290,8 +288,7 @@ pub struct PlayerRespawnConfig {
 
 /// A level of the open world, by its dimension (`minecraft:the_nether`).
 /// `Host::level` makes one, and `entity.level(host)` gives an entity's.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct LevelRef {
     pub(crate) epoch: WorldEpoch,
@@ -359,8 +356,7 @@ impl LevelRef {
 
 /// A mod-owned watered area in one server level. Created by [`LevelRef::add_water_ticket`].
 /// Explicit removal, owner disable and level unload invalidate it. Never saved.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct WaterTicket {
     pub(crate) level: LevelRef,
@@ -392,8 +388,7 @@ impl WaterTicket {
 /// again on each call: it reads as `None` or `false` once the raid is gone,
 /// for a handle of an earlier open, for a closed level, and on a client.
 /// Reads and writes reach parked server levels without moving them into place.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct RaidRef {
     pub(crate) level: LevelRef,
@@ -434,8 +429,7 @@ pub enum RaidStatus {
 
 /// A chunk position in an open level. A handle may be kept after unloading;
 /// reads resolve it again, returning `false` or `None` when it is no longer loaded.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ChunkRef {
     pub(crate) level: LevelRef,
@@ -1095,8 +1089,7 @@ pub struct EntityRayHit {
 }
 
 /// Non-paused authoritative server ticks since open (not game or frame time).
-#[derive(sunrise_mod_api_macros::Wire)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct TickId(pub(crate) u64);
 
@@ -1710,8 +1703,7 @@ pub enum GameRuleReadError {
 /// objective that was removed (even if its name was added again) or a handle from an earlier
 /// open reads as stale: reads answer `None` or [`ObjectiveError::Stale`] and writes change
 /// nothing.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ObjectiveRef {
     pub(crate) epoch: WorldEpoch,
@@ -1722,8 +1714,7 @@ pub struct ObjectiveRef {
 /// world's epoch and an identity the board gave the team when it was added, so a team that was
 /// removed (even if its name was added again) or a handle from an earlier open reads as stale:
 /// reads answer `None` or [`TeamError::Stale`] and writes change nothing.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct TeamRef {
     pub(crate) epoch: WorldEpoch,

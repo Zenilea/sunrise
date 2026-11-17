@@ -4,8 +4,7 @@ use crate::*;
 
 /// The listener of a vibration signal (`VibrationParticleOption`), independent
 /// of its resolved rendering destination and of the network protocol.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[derive(Clone, Debug, PartialEq)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum PositionSource {
     /// A block listener, addressed by its block coordinates (not its centre).
@@ -20,8 +19,7 @@ pub enum PositionSource {
 }
 
 /// `ParticleOptions` with the parameters of the option classes used here.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[derive(Clone, Debug, PartialEq)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods use the constructors
 pub struct ParticleOptions {
     /// Provider identity issued by `Registrar::particle_key`, never an engine enum.

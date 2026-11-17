@@ -18,8 +18,7 @@ pub trait Component {
 }
 
 /// An owned component patch, independent of the engine's component representation.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Components {
     patch: Compound,

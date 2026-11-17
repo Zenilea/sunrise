@@ -95,7 +95,7 @@ pub(crate) fn expand(mut input: DeriveInput) -> syn::Result<TokenStream> {
                 let mut os = Vec::new();
                 for (field, bind) in variant.fields.iter().zip(binds) {
                     check_owned(&field.ty)?;
-                        ps.push(quote!(out.put(#bind);));
+                    ps.push(quote!(out.put(#bind);));
                     os.push(quote!(out.put_owned(#bind);));
                 }
                 puts.push(quote!(#pat => { out.put(&#index); #(#ps)* }));

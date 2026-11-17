@@ -152,8 +152,7 @@ impl fmt::Display for PartStateError {
 impl std::error::Error for PartStateError {}
 
 /// Why a Part's state declaration was refused at registration.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum PartStateRefusal {
     /// `DATA.sync` is set: Part state is not sent to clients yet.
@@ -205,8 +204,7 @@ impl PartStateRefusal {
 }
 
 /// A Part with state could not be attached.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum BlockEntityStateError {
     /// The Part itself was refused, as by `block_entity_part`.
@@ -258,8 +256,7 @@ impl From<BlockEntityPartError> for BlockEntityStateError {
 }
 
 /// One Part state declaration, as the registrar checks it.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct PartStateDeclaration {
     /// The state's namespace.

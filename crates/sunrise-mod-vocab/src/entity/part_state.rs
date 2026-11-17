@@ -112,8 +112,7 @@ impl PartStateHolder for EntityRef {
 }
 
 /// An entity Part with state could not be attached: its state declaration was refused.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum EntityPartStateError {
     /// Its state declaration was refused.

@@ -635,8 +635,7 @@ impl SoundPlay {
 /// Dropping or overwriting the handle doesn't stop the sound: keep a looping sound's handle while
 /// it plays (stop it before starting another in its place), or nothing can stop it until the
 /// player leaves the level.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its field is private, so mods cannot build or destructure it
 pub struct SoundRef {
     pub(crate) id: u64,
@@ -1072,8 +1071,7 @@ pub enum CrosshairTarget {
 /// that was removed (even if its id was added again) or a handle from an
 /// earlier open reads as `None` and changes nothing. Mob and raid bars are not
 /// custom boss events and have no handle.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct BossBarRef {
     pub(crate) epoch: WorldEpoch,
@@ -1216,8 +1214,7 @@ pub struct ClientBossBar {
 ///     menu.click(host, &[]);
 /// }
 /// ```
-#[derive(sunrise_mod_api_macros::Wire)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct MenuRef {
     pub(crate) player: PlayerRef,

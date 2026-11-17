@@ -77,8 +77,7 @@ impl DamageValues {
     }
 }
 /// A plain snapshot of one hit. Sequencing and normalization remain owned by the game.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[derive(Clone, Debug, PartialEq)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Debug, PartialEq)]
 // exhaustive: its wrapped values are private; mods use constructors and accessors
 pub struct DamageContainer(DamageValues);
 impl From<DamageValues> for DamageContainer {

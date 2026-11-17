@@ -464,8 +464,7 @@ impl PartRegistrar {
             })?;
         self.attachment_uses
             .push((self.mod_id.into(), key.0.into(), key.1.into()));
-        self.part_states
-            .insert(key, declaration.data_name);
+        self.part_states.insert(key, declaration.data_name);
         Ok(())
     }
 }

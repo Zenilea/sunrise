@@ -214,8 +214,9 @@ pub enum HeightmapType {
 }
 
 /// An opaque, process-local biome identity. Do not persist it or perform arithmetic on it.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash,
+)]
 #[non_exhaustive]
 pub struct BiomeId(pub(crate) u32);
 

@@ -2,8 +2,7 @@
 use std::collections::BTreeMap;
 
 /// How a code package runs.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum PackageRuntime {
     /// Native code, built against the game build it was made for and loaded beside it, not
@@ -17,8 +16,17 @@ pub enum PackageRuntime {
 ///
 /// This changes listener/content ordering only. `None` never removes a code
 /// library's Cargo or wasm link requirements.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    sunrise_mod_api_macros::Wire,
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
 pub enum DependencyOrder {
@@ -32,8 +40,7 @@ pub enum DependencyOrder {
 }
 
 /// The meaning of one manifest declaration about another package.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum DependencyKind {
     /// A required dependency; code packages also require a physical API library.
@@ -52,8 +59,7 @@ pub enum DependencyKind {
 ///
 /// This is the manifest as written, not a side-filtered or override-rewritten
 /// resolution. Inspect `side` against the installation side when needed.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct PackageDependency {
     pub(crate) id: String,
@@ -118,8 +124,7 @@ impl PackageDependency {
 }
 
 /// One value of a manifest's `[properties]` table.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[derive(Clone, Debug, PartialEq)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum PropertyValue {
     /// A TOML string.
@@ -133,8 +138,7 @@ pub enum PropertyValue {
 }
 
 /// The descriptive part of a package's manifest. Missing fields are empty or `None`.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Debug, Default, PartialEq)]
 #[non_exhaustive]
 pub struct PackageDetails {
     /// The display name.
