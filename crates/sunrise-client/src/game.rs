@@ -1432,6 +1432,7 @@ struct Game<'a> {
     use_clicks: sunrise_client::input_queue::ClickQueue,
     hand_strength: sunrise_client::attack_strength::AttackStrength,
     settings: Settings,
+    look: look::LookCache,
     tutorial: tutorial::Tutorial,
     tutorial_toasts: Vec<tutorial::HintToast>,
     /// The `SystemToastId.NARRATOR_TOGGLE` toast, wherever the player is.
@@ -10948,6 +10949,7 @@ impl<'a> Game<'a> {
             use_clicks: hand::USE_CLICKS,
             hand_strength: Default::default(),
             settings,
+            look: Default::default(),
             tutorial,
             tutorial_toasts: Vec::new(),
             narrator_toast: None,
