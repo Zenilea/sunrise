@@ -17,13 +17,19 @@ use std::{cell::Cell, collections::HashMap, sync::Arc};
 /// `HeaderAndFooterLayout(8, 38)`: the room above and below the content.
 const HEADER_H: i32 = 8;
 const FOOTER_H: i32 = 38;
-/// The sidebar's and the info panel's width, and the controls' height.
+/// The sidebar's width and the controls' height.
 const SIDEBAR_W: i32 = 150;
 const SORT_W: i32 = 50;
 const CONTROL_H: i32 = 20;
-const PANEL_W: i32 = 250;
+/// The widest and narrowest the info panel's text gets: it shrinks on narrow screens.
+const PANEL_MAX: i32 = 250;
+const PANEL_MIN: i32 = 100;
+/// The room between the list and the panel's frame, and between both and the screen's edges.
+const GAP: i32 = 6;
 /// How far the panel's frame reaches beyond its contents.
 const FRAME_PAD: i32 = 2;
+/// The room between the panel's frame and its text, left and right.
+const INSET: i32 = 4;
 /// A list row is its icon and 2 px above and below.
 const ICON: i32 = 24;
 const ROW_H: i32 = ICON + 4;
@@ -32,8 +38,6 @@ const BANNER_H: i32 = 50;
 /// The panel's button row.
 const BUTTONS_H: i32 = 26;
 const MAIN_PAD: i32 = 4;
-/// The sidebar and the panel overlap by 3 px (`columnSpacing(-3)`).
-const TOTAL_W: i32 = SIDEBAR_W - 3 + PANEL_W;
 const SCROLLBAR_W: i32 = 6;
 const WHEEL_STEP: f64 = 18.0;
 const ROWS: usize = 1000;
@@ -100,8 +104,8 @@ impl Entry {
             id: "sunrise".into(),
             name: "Sunrise".into(),
             version: sunrise_core::release::VERSION.into(),
-            authors: "Ludovic Marie and the Horizon contributors".into(),
-            license: "MIT".into(),
+            authors: "The Sunrise contributors".into(),
+            license: "PolyForm Shield 1.0.0".into(),
             license_url: Some("https://github.com/sunrise-org/sunrise/blob/main/LICENSE".into()),
             homepage: Some("https://playsunrise.net".into()),
             issues: Some("https://github.com/sunrise-org/sunrise/issues".into()),
@@ -166,8 +170,10 @@ struct Geo {
     search: [i32; 4],
     sort: [i32; 4],
     list: [i32; 4],
-    /// The scrolling part of the info panel.
+    /// The scrolling part of the info panel: its text, inside the frame.
     panel: [i32; 4],
+    /// The panel's frame: its background and separators, apart from the list.
+    frame: [i32; 4],
     /// Homepage, Issues and Config.
     buttons: [[i32; 4]; 3],
     /// Open Mods Folder and Back.
@@ -339,12 +345,18 @@ impl ModsScreen {
 
     fn geo(&self) -> Geo {
         let content = (self.height - HEADER_H - FOOTER_H).max(0);
-        let left = ((self.width - TOTAL_W) / 2).max(0);
+        // The panel takes what the list leaves, up to its widest; the pair is centred.
+        let pad = FRAME_PAD + INSET;
+        let room = self.width - 2 * GAP - SIDEBAR_W - GAP - 2 * pad;
+        let panel_w = room.clamp(PANEL_MIN, PANEL_MAX);
+        let frame_w = panel_w + 2 * pad;
+        let left = ((self.width - (SIDEBAR_W + GAP + frame_w)) / 2).max(GAP);
         let top = HEADER_H - FRAME_PAD;
-        let panel_x = left + SIDEBAR_W - 3;
+        let frame_x = left + SIDEBAR_W + GAP;
+        let panel_x = frame_x + pad;
         let view = (content - BUTTONS_H).max(0);
-        let button_w = PANEL_W / 3 - 1;
-        let gap = (PANEL_W + 2 * FRAME_PAD - 3 * button_w) / 4;
+        let gap = 2;
+        let button_w = (frame_w - 4 * gap) / 3;
         let button_y = HEADER_H + view + (BUTTONS_H - CONTROL_H);
         let footer_w = ((self.width - 4) / 2).clamp(1, 150);
         let footer_x = (self.width - (2 * footer_w + 4)) / 2;
@@ -358,10 +370,11 @@ impl ModsScreen {
                 SIDEBAR_W,
                 (content - CONTROL_H - 5).max(0),
             ],
-            panel: [panel_x, HEADER_H, PANEL_W, view],
+            panel: [panel_x, HEADER_H, panel_w, view],
+            frame: [frame_x, top, frame_w, view + 2 * FRAME_PAD],
             buttons: [0, 1, 2].map(|i| {
                 [
-                    panel_x - FRAME_PAD + gap + i * (button_w + gap),
+                    frame_x + gap + i * (button_w + gap),
                     button_y,
                     button_w,
                     CONTROL_H,
@@ -642,12 +655,12 @@ impl ModsScreen {
     }
     /// The panel's items for the selected mod, narrower by the scrollbar when they need one.
     fn panel_items(&self, m: &Measure, e: &Entry) -> (Vec<Placed>, i32, i32, i32) {
-        let view = self.geo().panel[3];
-        let (items, content, pinned) = self.items(m, e, PANEL_W);
+        let [_, _, panel_w, view] = self.geo().panel;
+        let (items, content, pinned) = self.items(m, e, panel_w);
         if content <= view {
-            return (items, content, PANEL_W, pinned);
+            return (items, content, panel_w, pinned);
         }
-        let width = PANEL_W - SCROLLBAR_W;
+        let width = panel_w - SCROLLBAR_W;
         let (items, content, pinned) = self.items(m, e, width);
         // Keep at least three body lines and a third of the view useful.
         // Otherwise the whole pane scrolls, including an unusually tall status.
@@ -735,7 +748,7 @@ impl ModsScreen {
         let view = g.panel[3];
         if Scroll::max(content, view) > 0
             && y >= f64::from(g.panel[1] + pinned)
-            && x >= f64::from(g.panel[0] + PANEL_W + FRAME_PAD - SCROLLBAR_W)
+            && x >= f64::from(g.frame[0] + g.frame[2] - FRAME_PAD - SCROLLBAR_W)
         {
             self.panel.held = Some(y);
             return (Action::None, false);
@@ -791,16 +804,7 @@ impl ModsScreen {
             let content = self.list_content();
             self.list
                 .set(self.list.amount - amount * WHEEL_STEP, content, g.list[3]);
-        } else if hit(
-            [
-                g.panel[0] - FRAME_PAD,
-                g.panel[1],
-                PANEL_W + 2 * FRAME_PAD,
-                g.panel[3],
-            ],
-            x,
-            y,
-        ) {
+        } else if hit([g.frame[0], g.panel[1], g.frame[2], g.panel[3]], x, y) {
             let content = self.panel_content.get();
             self.panel
                 .set(self.panel.amount - amount * WHEEL_STEP, content, g.panel[3]);
@@ -856,24 +860,22 @@ impl ModsScreen {
         if sort_hover {
             tooltip = Some(tr(&format!("{name}.hover")));
         }
-        // The info panel's frame, under the list so the list's scrollbar stays on top where
-        // the two overlap.
-        let [px, py, _, view] = g.panel;
-        // `BackgroundWithPipingWidget`: the list's background and separators, with the frame's
-        // 2 px inset on every side for the separators and the scrolling contents between them.
-        let frame_w = PANEL_W + 2 * FRAME_PAD;
+        // The info panel's frame, beside the list: `BackgroundWithPipingWidget`, the list's
+        // background between two separators, 2 px beyond the scrolling contents above and below.
+        let [px, py, panel_w, view] = g.panel;
+        let [fx, fy, frame_w, frame_h] = g.frame;
         d::blit(
             &mut out,
             &format!("textures/gui/{prefix}menu_list_background.png"),
-            px - FRAME_PAD,
-            py - FRAME_PAD,
+            fx,
+            fy,
             (0.0, 0.0),
             frame_w,
-            view + 2 * FRAME_PAD,
+            frame_h,
             [32, 32],
         );
-        separator_at(&mut out, "header", px - FRAME_PAD, py - FRAME_PAD, frame_w);
-        separator_at(&mut out, "footer", px - FRAME_PAD, py + view, frame_w);
+        separator_at(&mut out, "header", fx, fy, frame_w);
+        separator_at(&mut out, "footer", fx, py + view, frame_w);
 
         self.draw_list(&mut out, m, &g);
 
@@ -885,9 +887,9 @@ impl ModsScreen {
             self.panel_pinned.set(pinned);
             let scroll = self.panel.amount.min(f64::from(Scroll::max(content, view))) as i32;
             out.push(Draw::Scissor {
-                x0: px - FRAME_PAD,
+                x0: fx,
                 y0: py,
-                x1: px + PANEL_W + FRAME_PAD,
+                x1: fx + frame_w,
                 y1: py + pinned.min(view),
             });
             let mut body = false;
@@ -895,9 +897,9 @@ impl ModsScreen {
                 if !body && placed.y >= pinned {
                     out.push(Draw::NoScissor);
                     out.push(Draw::Scissor {
-                        x0: px - FRAME_PAD,
+                        x0: fx,
                         y0: py + pinned.min(view),
-                        x1: px + PANEL_W + FRAME_PAD,
+                        x1: fx + frame_w,
                         y1: py + view,
                     });
                     body = true;
@@ -905,7 +907,7 @@ impl ModsScreen {
                 let y = py + placed.y - if body { scroll } else { 0 };
                 match &placed.kind {
                     Kind::Image { texture, size } => {
-                        let x = px + (PANEL_W - size) / 2;
+                        let x = px + (panel_w - size) / 2;
                         d::blit(
                             &mut out,
                             texture,
@@ -972,7 +974,7 @@ impl ModsScreen {
             out.push(Draw::NoScissor);
             self.panel.draw(
                 &mut out,
-                px + PANEL_W + FRAME_PAD - SCROLLBAR_W,
+                fx + frame_w - FRAME_PAD - SCROLLBAR_W,
                 py + pinned,
                 content - pinned,
                 view - pinned,
@@ -1116,56 +1118,10 @@ impl ModsScreen {
     }
 }
 
-/// The atlas sprite of the main menu's Mods button, as the icons beside it are named.
-pub const ICON_SPRITE: &str = "gui/sprites/icon/mods";
-/// A cube, drawn in three greys for its top and two sides: `#` light, `o` middle, `x` dark.
-const ICON_ART: [&str; 15] = [
-    ".......#.......",
-    ".....#####.....",
-    "...#########...",
-    ".#############.",
-    "...#########...",
-    ".....#####.....",
-    ".......#.......",
-    ".oooooo#xxxxxx.",
-    ".oooooo#xxxxxx.",
-    ".oooooo#xxxxxx.",
-    ".oooooo#xxxxxx.",
-    "..ooooo#xxxxx..",
-    "...oooo#xxxx...",
-    ".....oo#xx.....",
-    ".......#.......",
-];
-
-/// The Mods button's icon for the atlas: `(sprite, width, height, RGBA texels)`.
-pub fn icon_image() -> (String, u32, u32, Vec<u8>) {
-    let pixels = ICON_ART
-        .iter()
-        .flat_map(|row| row.chars())
-        .flat_map(|c| match c {
-            '#' => [255, 255, 255, 255],
-            'o' => [176, 176, 176, 255],
-            'x' => [112, 112, 112, 255],
-            _ => [0, 0, 0, 0],
-        })
-        .collect();
-    (ICON_SPRITE.to_owned(), 15, 15, pixels)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::mod_list::{Installed, ModInfo, NativePage};
-
-    #[test]
-    fn the_mods_icon_is_a_fifteen_pixel_square_with_a_clear_corner() {
-        assert!(ICON_ART.iter().all(|row| row.chars().count() == 15));
-        let (name, w, h, pixels) = icon_image();
-        assert_eq!((name.as_str(), w, h), (ICON_SPRITE, 15, 15));
-        assert_eq!(pixels.len(), 15 * 15 * 4);
-        assert_eq!(pixels[3], 0, "the corner is clear");
-        assert_eq!(pixels[(7 * 4) + 3], 255, "the cube's top point is drawn");
-    }
 
     fn atlas() -> HudAtlas {
         HudAtlas::build(&sunrise_assets::resource_source::ResourceSource::directory(
@@ -1538,14 +1494,14 @@ mod tests {
         assert!(screen.panel_content.get() > screen.geo().panel[3]);
     }
 
-    /// `BackgroundWithPipingWidget`: the info panel is framed like the list, 2 px beyond its
-    /// 250 px contents on every side, with the list's background between two separators.
+    /// `BackgroundWithPipingWidget`: the info panel is framed like the list, with the list's
+    /// background between two separators. Literal rectangles at 427 px wide: the list from
+    /// x = 6, 6 px of room, then a 259 px frame whose text starts 6 px inside it.
     #[test]
     fn the_info_panel_has_the_lists_background_and_separators() {
         let atlas = atlas();
         let m = Measure(&atlas.font);
         let screen = ModsScreen::new(427, 240, false, &ModList::default());
-        let [px, py, _, view] = screen.geo().panel;
         let draws = screen.draw(&m, (0, 0), 0, 0);
         let blit = |texture: &str, x: i32, y: i32, w: i32, h: i32| {
             draws.iter().any(|call| {
@@ -1553,46 +1509,48 @@ mod tests {
                     if t == texture && (*bx, *by, *bw, *bh) == (x, y, w, h))
             })
         };
+        // 240 - 8 - 38 = 194 of content, less the 26 px button row: a 168 px view.
+        assert_eq!(screen.geo().panel, [168, 8, 247, 168]);
         assert!(blit(
             "textures/gui/menu_list_background.png",
-            px - 2,
-            py - 2,
-            254,
-            view + 4
+            162,
+            6,
+            259,
+            172
         ));
-        assert!(blit(
-            "textures/gui/header_separator.png",
-            px - 2,
-            py - 2,
-            254,
-            2
-        ));
-        assert!(blit(
-            "textures/gui/footer_separator.png",
-            px - 2,
-            py + view,
-            254,
-            2
-        ));
+        assert!(blit("textures/gui/header_separator.png", 162, 6, 259, 2));
+        assert!(blit("textures/gui/footer_separator.png", 162, 176, 259, 2));
     }
 
-    /// The panel's frame reaches 5 px into the list's scrollbar at 427 px wide, so it is drawn
-    /// first and the list, scrollbar included, goes over it.
+    /// The list and the panel sit side by side with room between them on every width the
+    /// screen meets, the panel narrowing instead of running into the list or off the screen.
     #[test]
-    fn the_panel_frame_is_drawn_under_the_list() {
-        let atlas = atlas();
-        let m = Measure(&atlas.font);
-        let screen = ModsScreen::new(427, 240, false, &ModList::default());
-        let [px, _, _, _] = screen.geo().panel;
-        let [lx, ..] = screen.geo().list;
-        let draws = screen.draw(&m, (0, 0), 0, 0);
-        let background_at = |x: i32| {
-            draws.iter().position(|call| {
-                matches!(call, Draw::Blit { texture, x: bx, .. }
-                    if texture == "textures/gui/menu_list_background.png" && *bx == x)
-            })
-        };
-        let (frame, list) = (background_at(px - 2).unwrap(), background_at(lx).unwrap());
-        assert!(frame < list, "frame at {frame}, list at {list}");
+    fn the_panel_never_overlaps_the_list() {
+        for width in [320, 397, 427, 640, 854, 1280] {
+            let g = ModsScreen::new(width, 240, false, &ModList::default()).geo();
+            let list_right = g.list[0] + g.list[2];
+            let [fx, _, fw, _] = g.frame;
+            assert!(g.list[0] >= 6, "{width}: list at {}", g.list[0]);
+            assert!(
+                fx >= list_right + 6,
+                "{width}: frame at {fx}, list ends at {list_right}"
+            );
+            assert!(
+                g.panel[0] >= fx + 6,
+                "{width}: text at {}, frame at {fx}",
+                g.panel[0]
+            );
+            assert!(
+                g.panel[0] + g.panel[2] <= fx + fw - 6,
+                "{width}: text runs to the frame"
+            );
+            assert!(fx + fw <= width, "{width}: frame ends at {}", fx + fw);
+            for b in g.buttons {
+                assert!(
+                    b[0] >= fx && b[0] + b[2] <= fx + fw,
+                    "{width}: button {b:?}"
+                );
+            }
+        }
     }
 }

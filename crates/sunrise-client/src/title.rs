@@ -2095,7 +2095,6 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
             }
         };
         let narratable = match b.id {
-            9 => icon("sunrise.mods.screen.narration"),
             5 => icon("gui.friends.open.narration"),
             6 => icon("options.language.narration"),
             7 => icon("accessibility.onboarding.accessibility.button.narration"),
@@ -2104,7 +2103,7 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
         // TitleScreen.init adds the icon row after Minecraft Realms and before
         // Options... and Quit Game, which Sunrise draws first.
         narratable.order(match b.id {
-            5..=7 | 9 => 1,
+            5..=7 => 1,
             2 | 3 => 2,
             _ => 0,
         })
@@ -2116,7 +2115,6 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
     /// (always, for Sunrise's Join a Friend).
     fn button_tooltip(&self, id: u8) -> Option<&'static str> {
         match (&self.mode, id) {
-            (Mode::Main, 9) => Some("sunrise.pages.mods.tooltip"),
             (Mode::Main, 5) => Some("gui.friends.open.tooltip"),
             (Mode::Main, 6) | (Mode::Onboarding(_), onboarding::LANGUAGE) => {
                 Some("options.language.tooltip")
@@ -3977,14 +3975,15 @@ mod classic_tests {
             title.click(310.0, 235.0, (427.0, 240.0)),
             (Action::Credits, true)
         );
+        // Just above it, and right of Quit Game.
         assert_eq!(
-            title.click(310.0, 225.0, (427.0, 240.0)),
+            title.click(330.0, 225.0, (427.0, 240.0)),
             (Action::None, false)
         );
     }
 
     #[test]
-    fn classic_main_menu_icons_route_mods_language_and_accessibility() {
+    fn classic_main_menu_routes_mods_friends_language_and_accessibility() {
         crate::net::JOINS_FRIENDS_IN_TEST.set(true);
         let mut title = Title::new(
             PathBuf::new(),
@@ -3994,22 +3993,35 @@ mod classic_tests {
         for (w, h) in [(960.0, 523.0), (480.0, 320.0), (427.0, 240.0)] {
             let buttons = title.buttons(w, h);
             let cx = (w / 2.0).floor();
-            let y = (h / 4.0).floor() + 48.0;
+            let y = Title::main_menu_top(h);
+            // Minecraft Realms, then Sunrise's Mods a full row below it.
+            let realms = buttons.iter().find(|b| b.id == 8).unwrap();
+            let mods = buttons.iter().find(|b| b.id == 9).unwrap();
+            assert_eq!(
+                (realms.x, realms.y, realms.w),
+                (cx - 100.0, y + 48.0, 200.0)
+            );
+            assert_eq!(
+                (mods.x, mods.y, mods.w, mods.enabled, mods.icon),
+                (cx - 100.0, y + 72.0, 200.0, true, None)
+            );
+            assert_eq!(
+                title.click(cx + 50.0, y + 82.0, (w, h)),
+                (Action::Mods, true)
+            );
             for (id, x, enabled, icon) in [
-                (9, cx - 46.0, true, "icon/mods"),
-                (5, cx - 22.0, true, "friends/friends"),
-                (6, cx + 2.0, true, "icon/language"),
-                (7, cx + 26.0, true, "icon/accessibility"),
+                (5, cx - 34.0, true, "friends/friends"),
+                (6, cx - 10.0, true, "icon/language"),
+                (7, cx + 14.0, true, "icon/accessibility"),
             ] {
                 let b = buttons.iter().find(|b| b.id == id).unwrap();
                 assert_eq!(
                     (b.x, b.y, b.w, b.enabled, b.icon),
-                    (x, y + 72.0, 20.0, enabled, Some((icon, 15.0)))
+                    (x, y + 96.0, 20.0, enabled, Some((icon, 15.0)))
                 );
                 assert_eq!(
-                    title.click(x + 10.0, y + 82.0, (w, h)),
+                    title.click(x + 10.0, y + 106.0, (w, h)),
                     match id {
-                        9 => (Action::Mods, true),
                         6 => (Action::Language, true),
                         7 => (Action::Accessibility, true),
                         _ => (Action::None, true),
@@ -4024,15 +4036,21 @@ mod classic_tests {
                 }
             }
             for id in [2, 3] {
-                assert_eq!(buttons.iter().find(|b| b.id == id).unwrap().y, y + 96.0);
+                assert_eq!(buttons.iter().find(|b| b.id == id).unwrap().y, y + 120.0);
+                // The bottom row stays above the copyright line (drawn at height - 10).
+                assert!(
+                    y + 140.0 <= h - 12.0,
+                    "{w}x{h}: bottom row at {}",
+                    y + 120.0
+                );
             }
             // The four-pixel gaps around icons must not activate a button.
             assert_eq!(
-                title.click(cx + 24.0, y + 82.0, (w, h)),
+                title.click(cx + 12.0, y + 106.0, (w, h)),
                 (Action::None, false)
             );
             assert_eq!(
-                title.click(cx + 36.0, y + 92.0, (w, h)),
+                title.click(cx + 36.0, y + 116.0, (w, h)),
                 (Action::None, false)
             );
         }
@@ -4091,14 +4109,9 @@ mod classic_tests {
             "gui/title/edition".into(),
             crate::hud::Rect { w: 128, h: 16, ..r },
         );
-        for (i, icon) in [
-            "icon/mods",
-            "friends/friends",
-            "icon/language",
-            "icon/accessibility",
-        ]
-        .into_iter()
-        .enumerate()
+        for (i, icon) in ["friends/friends", "icon/language", "icon/accessibility"]
+            .into_iter()
+            .enumerate()
         {
             atlas.sprites.insert(
                 format!("gui/sprites/{icon}"),
@@ -4121,7 +4134,7 @@ mod classic_tests {
         assert_eq!(batch.vertices[6].pos, [cx - 64.0, 67.0]);
         assert_eq!(batch.vertices[8].pos, [cx + 64.0, 81.0]);
         assert_eq!(batch.vertices[8].uv, [1.0, 14.0 / 16.0]);
-        for i in 0..4 {
+        for i in 0..3 {
             let quad = batch
                 .vertices
                 .as_chunks::<6>()
@@ -4129,8 +4142,8 @@ mod classic_tests {
                 .iter()
                 .find(|quad| quad[0].uv == [0.25 + i as f32 * 0.125, 0.0])
                 .unwrap();
-            let x = cx - 46.0 + i as f32 * 24.0 + 3.0;
-            let y = (batch.height / 4.0).floor() + 48.0 + 72.0 + 3.0;
+            let x = cx - 34.0 + i as f32 * 24.0 + 3.0;
+            let y = Title::main_menu_top(batch.height) + 96.0 + 3.0;
             assert_eq!(quad[0].pos, [x, y]);
             assert_eq!(quad[2].pos, [x + 15.0, y + 15.0]);
             assert!(quad.iter().all(|v| v.color == u32::MAX));

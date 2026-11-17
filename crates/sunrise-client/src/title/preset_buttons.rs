@@ -1,5 +1,10 @@
 use super::*;
 impl Title {
+    /// The main menu's first row: vanilla's `height / 4 + 48`, lifted on short screens so
+    /// Options... and Quit Game, a row lower for Mods, stay clear of the copyright line.
+    pub(super) fn main_menu_top(h: f32) -> f32 {
+        ((h / 4.0).floor() + 48.0).min(h - 152.0)
+    }
     pub(super) fn buttons(&self, w: f32, h: f32) -> Vec<Button> {
         // The game rules draw and press their own.
         if self.rules.borrow().is_some() {
@@ -20,7 +25,7 @@ impl Title {
         match &self.mode {
             Mode::Main => {
                 let cx = (w / 2.0).floor();
-                let y = (h / 4.0).floor() + 48.0;
+                let y = Self::main_menu_top(h);
                 let mut buttons = vec![
                     b(
                         cx - 100.0,
@@ -48,9 +53,18 @@ impl Title {
                         self.allows_multiplayer,
                         8,
                     ),
+                    // Sunrise's Mods, a full row below Minecraft Realms.
                     b(
                         cx - 100.0,
-                        y + 96.0,
+                        y + 72.0,
+                        200.0,
+                        &lang::get_or("sunrise.mods.screen.title", "Mods"),
+                        true,
+                        9,
+                    ),
+                    b(
+                        cx - 100.0,
+                        y + 120.0,
                         98.0,
                         &lang::get_or("menu.options", "Options..."),
                         true,
@@ -59,7 +73,7 @@ impl Title {
                     .does(crate::widgets::Action::Options),
                     b(
                         cx + 2.0,
-                        y + 96.0,
+                        y + 120.0,
                         98.0,
                         &lang::get_or("menu.quit", "Quit Game"),
                         true,
@@ -70,7 +84,6 @@ impl Title {
                 // CommonButtons' icon buttons; Sunrise's Join a Friend (an
                 // invite code) sits behind vanilla's Friends button.
                 for (i, (key, plain, id, icon)) in [
-                    ("sunrise.mods.screen.title", "Mods", 9, "icon/mods"),
                     ("gui.friends.open", "Friends", 5, "friends/friends"),
                     ("options.language", "Language...", 6, "icon/language"),
                     (
@@ -84,8 +97,8 @@ impl Title {
                 .enumerate()
                 {
                     let mut button = b(
-                        cx - 46.0 + i as f32 * 24.0,
-                        y + 72.0,
+                        cx - 34.0 + i as f32 * 24.0,
+                        y + 96.0,
                         20.0,
                         &lang::get_or(key, plain),
                         id != 5 || crate::net::joins_friends(),
