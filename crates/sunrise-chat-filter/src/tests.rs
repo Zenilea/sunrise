@@ -354,3 +354,32 @@ fn duration_parts_preserve_rounding_without_overflow() {
         assert_eq!(duration_parts(millis), expected);
     }
 }
+
+#[test]
+fn a_mutes_file_that_cannot_be_read_is_kept_aside_and_reported() {
+    let dir = std::env::temp_dir().join(format!("chat-filter-bad-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join(MUTES_FILE);
+    // Half a file, as a crash in the middle of a write leaves it.
+    let cut = r#"{"mutes": [{"uuid": "00000000-0000-0000-0000-000000000005", "name": "Dee", "unt"#;
+    std::fs::write(&file, cut).unwrap();
+    let (mut g, problem) = Guard::load(Config::default(), &dir);
+    let problem = problem.expect("a mutes file that does not parse is reported");
+    let aside = dir.join(format!("{MUTES_FILE}.bad"));
+    assert!(
+        problem.contains(MUTES_FILE) && problem.contains(".bad"),
+        "{problem}"
+    );
+    assert_eq!(std::fs::read_to_string(&aside).unwrap(), cut);
+    // The next mute starts a new file and leaves the old one where it is.
+    g.mute(6, "Eve", None, "Op", None);
+    assert_eq!(std::fs::read_to_string(&aside).unwrap(), cut);
+    let (reloaded, again) = Guard::load(Config::default(), &dir);
+    assert_eq!(again, None);
+    assert!(reloaded.muted(6, now_millis()).is_some());
+    // No file at all is a first run, not a problem.
+    std::fs::remove_file(&file).unwrap();
+    assert_eq!(Guard::load(Config::default(), &dir).1, None);
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -82,22 +82,53 @@ impl Anticheat {
     /// Player `uuid` was kicked by `check`: its kicks by it so far and whether this one bans. The
     /// count is saved at once, so a restart doesn't forgive it.
     fn strike(&mut self, uuid: u128, check: Check) -> (u32, bool) {
-        let path = std::path::Path::new(&self.config.strikes);
-        let strikes = self.strikes.get_or_insert_with(|| {
-            std::fs::read(path)
-                .ok()
-                .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-                .unwrap_or_default()
-        });
+        // The durable write syncs the file's directory, which a bare file name has none of.
+        let path = std::path::absolute(&self.config.strikes)
+            .unwrap_or_else(|_| std::path::PathBuf::from(&self.config.strikes));
+        if self.strikes.is_none() {
+            let (strikes, problem) = load_strikes(&path);
+            if let Some(problem) = problem {
+                self.write_log(&problem);
+            }
+            self.strikes = Some(strikes);
+        }
         let ban_after = self.config.actions(check).ban_after;
+        let strikes = self.strikes.get_or_insert_default();
         let kick = strikes.kick(&uuid_text(uuid), check, ban_after);
         if !self.config.strikes.is_empty()
             && let Ok(json) = serde_json::to_vec_pretty(strikes)
         {
-            let _ = std::fs::write(path, json);
+            let _ = sunrise_server_files::durable::write(&path, &json);
         }
         kick
     }
+}
+
+/// The kicks saved in `path`, and why a file that exists could not be read. A missing file is a
+/// first run. One that cannot be read or parsed (half written by a crash, say) is moved to
+/// `<name>.bad`, so the next save does not write over the kicks in it.
+fn load_strikes(path: &std::path::Path) -> (Strikes, Option<String>) {
+    let read = match std::fs::read(path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (Strikes::default(), None),
+        read => read.map_err(|e| e.to_string()),
+    };
+    let reason =
+        match read.and_then(|bytes| serde_json::from_slice(&bytes).map_err(|e| e.to_string())) {
+            Ok(strikes) => return (strikes, None),
+            Err(reason) => reason,
+        };
+    let mut aside = path.as_os_str().to_owned();
+    aside.push(".bad");
+    let aside = std::path::PathBuf::from(aside);
+    let kept = match std::fs::rename(path, &aside) {
+        Ok(()) => format!("kept as {}", aside.display()),
+        Err(e) => format!("could not be moved aside ({e})"),
+    };
+    let problem = format!(
+        "{}: {reason}; starting with no kicks and the file {kept}",
+        path.display()
+    );
+    (Strikes::default(), Some(problem))
 }
 
 /// The flag log's writer thread. Dropped with the anticheat (the server stopping), it closes the
@@ -675,6 +706,47 @@ mod tests {
         drop(writer);
         let expected: Vec<String> = (0..5).map(|i| format!("flag {i}")).collect();
         assert_eq!(*written.lock().unwrap(), expected);
+    }
+
+    /// A strikes file cut off by a crash is kept as `.bad` and logged, not written over: the next
+    /// kick starts a new file and the old kicks can still be read.
+    #[test]
+    fn a_strikes_file_that_cannot_be_read_is_kept_aside_and_logged() {
+        let dir =
+            std::env::temp_dir().join(format!("sunrise-anticheat-strikes-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let strikes = dir.join("anticheat-strikes.json");
+        let log = dir.join("anticheat.log");
+        let cut = r#"{"069a79f4-44e9-4726-a5be-fca90e38aaf5": {"combat": 1"#;
+        std::fs::write(&strikes, cut).unwrap();
+        let mut anticheat = Anticheat::new(Config {
+            strikes: strikes.to_string_lossy().into_owned(),
+            log: log.to_string_lossy().into_owned(),
+            ..Config::default()
+        });
+        assert_eq!(anticheat.strike(7, Check::Combat).0, 1);
+        drop(anticheat);
+        let aside = dir.join("anticheat-strikes.json.bad");
+        assert_eq!(std::fs::read_to_string(&aside).unwrap(), cut);
+        let saved: Strikes =
+            serde_json::from_slice(&std::fs::read(&strikes).unwrap()).expect("a new file");
+        assert_eq!(saved.0.len(), 1);
+        let logged = std::fs::read_to_string(&log).unwrap();
+        assert!(logged.contains("anticheat-strikes.json.bad"), "{logged}");
+        // A missing file is a first run, and what was saved is read back.
+        let mut again = Anticheat::new(Config {
+            strikes: strikes.to_string_lossy().into_owned(),
+            ..Config::default()
+        });
+        assert_eq!(again.strike(7, Check::Combat).0, 2);
+        std::fs::remove_file(&strikes).unwrap();
+        let mut fresh = Anticheat::new(Config {
+            strikes: strikes.to_string_lossy().into_owned(),
+            ..Config::default()
+        });
+        assert_eq!(fresh.strike(7, Check::Combat).0, 1);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

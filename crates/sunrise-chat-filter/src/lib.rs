@@ -299,23 +299,41 @@ const MINUTE: i64 = 60_000;
 
 impl Guard {
     pub fn new(config: Config, filter: Filter, file: Option<PathBuf>) -> Self {
+        Self::open(config, filter, file).0
+    }
+
+    /// [`Guard::new`], and why the mutes file could not be used when it exists but cannot be read.
+    fn open(config: Config, filter: Filter, file: Option<PathBuf>) -> (Self, Option<String>) {
         let mut mutes = HashMap::new();
-        if let Some(text) = file.as_ref().and_then(|f| std::fs::read_to_string(f).ok())
-            && let Ok(saved) = serde_json::from_str::<MutesFile>(&text)
-        {
-            for m in saved.mutes {
-                if let Some(uuid) = parse_uuid(&m.uuid) {
-                    mutes.insert(uuid, m.into());
+        let mut problem = None;
+        if let Some(file) = &file {
+            let read = match std::fs::read_to_string(file) {
+                // No file yet is a first run.
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                read => read.map(Some).map_err(|e| e.to_string()),
+            };
+            match read.and_then(|text| {
+                text.map(|text| serde_json::from_str::<MutesFile>(&text).map_err(|e| e.to_string()))
+                    .transpose()
+            }) {
+                Ok(saved) => {
+                    for m in saved.into_iter().flat_map(|saved| saved.mutes) {
+                        if let Some(uuid) = parse_uuid(&m.uuid) {
+                            mutes.insert(uuid, m.into());
+                        }
+                    }
                 }
+                Err(reason) => problem = Some(set_aside(file, &reason)),
             }
         }
-        Self {
+        let guard = Self {
             config,
             filter,
             strikes: HashMap::new(),
             mutes,
             file,
-        }
+        };
+        (guard, problem)
     }
 
     /// The server's guard: `words_file` or the built-in list, the mutes in `dir`. An unreadable
@@ -336,10 +354,9 @@ impl Guard {
                 }
             }
         };
-        (
-            Self::new(config, filter, Some(dir.join(MUTES_FILE))),
-            problem,
-        )
+        let (guard, mutes_problem) = Self::open(config, filter, Some(dir.join(MUTES_FILE)));
+        let problems: Vec<String> = problem.into_iter().chain(mutes_problem).collect();
+        (guard, (!problems.is_empty()).then(|| problems.join("; ")))
     }
 
     /// The player's mute, if they are muted at `now`.
@@ -446,12 +463,27 @@ impl Guard {
         let mut mutes: Vec<SavedMute> = self.mutes.values().cloned().map(Into::into).collect();
         mutes.sort_by(|a, b| a.name.cmp(&b.name));
         if let Ok(text) = serde_json::to_string_pretty(&MutesFile { mutes }) {
-            let tmp = file.with_extension("json.tmp");
-            if std::fs::write(&tmp, text).is_ok() {
-                let _ = std::fs::rename(&tmp, file);
-            }
+            // The durable write syncs the file's directory, which a bare file name has none of.
+            let file = std::path::absolute(file).unwrap_or_else(|_| file.clone());
+            let _ = sunrise_server_files::durable::write(&file, text.as_bytes());
         }
     }
+}
+
+/// Moves a mutes file that cannot be read to `<name>.bad`, so the next save does not write over
+/// the mutes in it, and says what happened.
+fn set_aside(file: &Path, reason: &str) -> String {
+    let mut aside = file.as_os_str().to_owned();
+    aside.push(".bad");
+    let aside = PathBuf::from(aside);
+    let kept = match std::fs::rename(file, &aside) {
+        Ok(()) => format!("kept as {}", aside.display()),
+        Err(e) => format!("could not be moved aside ({e})"),
+    };
+    format!(
+        "{}: {reason}; no mutes were loaded and the file {kept}",
+        file.display()
+    )
 }
 
 impl ChatGuard for Guard {
