@@ -2,7 +2,7 @@
 
 ## Settings
 
-Sunrise's graphics settings are one screen, and **Options → Video Settings...** opens it, as Sodium's video screen replaces vanilla's: it holds every row of vanilla's Video Settings (with vanilla's names and values, kept in `options.txt` under vanilla's keys), Sunrise's own graphics settings, the extras that change the picture (fullbright, dynamic lights, hiding block-break particles) and the shader packs. Each setting is in one place: FOV stays on the Options screen and View Bobbing in Accessibility, where vanilla has them; vanilla's Graphics API button is Advanced's Graphics API. `sunrise-ctl options video-vanilla` still shows vanilla's own Video Settings layout, which no menu opens.
+**Options → Video Settings...** opens vanilla's Video Settings screen, laid out as vanilla's. Sunrise's graphics settings are one screen (`sunrise-ctl options graphics`): it holds every row of vanilla's Video Settings (with vanilla's names and values, kept in `options.txt` under vanilla's keys), Sunrise's own graphics settings, the extras that change the picture (fullbright, dynamic lights, hiding block-break particles) and the shader packs. Each setting is in one place: FOV stays on the Options screen and View Bobbing in Accessibility, where vanilla has them; vanilla's Graphics API button is Advanced's Graphics API.
 
 The screen holds vanilla's video options and Sunrise's own together, built from Minecraft's own screen patterns in the design system's Blocks palette (`docs/design-system.md`), on see-through panels so the world stays in view:
 

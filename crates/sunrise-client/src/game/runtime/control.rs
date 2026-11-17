@@ -58,7 +58,7 @@ const HELP: &[&str] = &[
     "chat TEXT                      send a chat line or /command as if typed",
     "type TEXT                      type into the open chat box (key enter tap sends)",
     "chat-log [N]                   the newest N chat messages (default 10)",
-    "options [PAGE]                 open the options (video sound controls keybinds mouse chat accessibility language font packs mods graphics graphics-advanced graphics-hdr video-vanilla)",
+    "options [PAGE]                 open the options (video sound controls keybinds mouse chat accessibility language font packs mods graphics graphics-advanced graphics-hdr)",
     "stats [reset] [raw]            frame-time summary since the last reset (raw: every frame time too)",
     "profile [client|server] start|stop|status|mark NAME  capture the performance of the window and, in single player, its server thread to reports/ (sunrise-ctl profile --help)",
     "narration                      the narrator's status and the last messages it was asked to say",
@@ -1166,9 +1166,7 @@ impl Game<'_> {
                 use sunrise_client::options_ui::Page;
                 let page = match words.get(1).copied().unwrap_or("main") {
                     "main" => Page::Main,
-                    // What Video Settings... opens; vanilla's own layout, which no menu opens.
-                    "video" => Page::Graphics,
-                    "video-vanilla" => Page::Video,
+                    "video" => Page::Video,
                     "sound" => Page::Sound,
                     "controls" => Page::Controls,
                     "keybinds" => Page::KeyBinds,

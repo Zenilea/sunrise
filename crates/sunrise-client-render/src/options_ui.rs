@@ -2829,9 +2829,8 @@ impl OptionsUi {
                 rows
             }
             Page::Video => {
-                // Vanilla's VideoSettingsScreen as vanilla lays it out. No menu opens it (Video
-                // Settings... opens the graphics screen, which has all of it); it stays for
-                // `sunrise-ctl options video-vanilla` and the tests that pin vanilla's screen.
+                // Vanilla's VideoSettingsScreen as vanilla lays it out: what Video Settings...
+                // opens.
                 let mut rows = vec![Row::Header("options.video.display.header")];
                 rows.push(Row::Big(Opt::ExclusiveMode));
                 rows.extend(pairs(&[
@@ -7657,8 +7656,8 @@ mod tests {
             &main[main.len() - 3..],
             [Page::Sunrise, Page::Mods, Page::Credits]
         );
-        // Video Settings... is the graphics screen, as Sodium's.
-        assert!(main.contains(&Page::Graphics) && !main.contains(&Page::Video));
+        // Video Settings... is vanilla's VideoSettingsScreen.
+        assert!(main.contains(&Page::Video) && !main.contains(&Page::Graphics));
         ui.push(Page::Sunrise);
         assert_eq!(
             pushes(&mut ui),
