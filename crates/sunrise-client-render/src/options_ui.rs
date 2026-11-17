@@ -7574,7 +7574,7 @@ mod tests {
         }
         // Vanilla's own: the same option on two of its screens.
         let vanilla_repeats: BTreeMap<&str, &[&str]> = [
-            ("MenuBlur", &["Accessibility", "Graphics"][..]),
+            ("MenuBlur", &["Accessibility", "Video"][..]),
             ("ShowSubtitles", &["Accessibility", "Sound"][..]),
             ("Narrator", &["Accessibility", "Chat"][..]),
             ("ChatOpacity", &["Accessibility", "Chat"][..]),
@@ -7583,7 +7583,11 @@ mod tests {
         ]
         .into();
         for (id, pages) in &places {
-            let pages: Vec<&str> = pages.iter().map(String::as_str).collect();
+            let mut pages: Vec<&str> = pages.iter().map(String::as_str).collect();
+            // Sunrise's graphics screen repeats every row of vanilla's Video Settings.
+            if pages.contains(&"Video") {
+                pages.retain(|p| *p != "Graphics");
+            }
             match vanilla_repeats.get(id.as_str()) {
                 Some(expected) => assert_eq!(&pages, expected, "{id}"),
                 None => assert_eq!(pages.len(), 1, "{id} is on {pages:?}"),
@@ -7602,9 +7606,12 @@ mod tests {
             Some(1),
             "{ways_in:?}"
         );
-        assert!(
-            !seen.contains("Video"),
-            "vanilla's own layout has no way in"
+        // Video Settings... opens vanilla's own layout.
+        assert_eq!(
+            ways_in
+                .get("Video")
+                .map(|f| f.iter().map(String::as_str).collect::<Vec<_>>()),
+            Some(vec!["Main"])
         );
         // Every row of vanilla's Video Settings is on the graphics screen.
         ui.stack = vec![Page::Video];
