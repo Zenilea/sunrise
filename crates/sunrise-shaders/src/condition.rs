@@ -5,7 +5,11 @@
 //! pack would then lose a whole section of its settings over one unknown name.
 
 use crate::Macros;
-use crate::macros::{is_ident, is_ident_start};
+use crate::macros::{MAX_EXPANSION, is_ident, is_ident_start};
+
+/// How deep a condition's brackets and unary operators may nest: each level is a recursion of the
+/// evaluator.
+const MAX_NESTING: usize = 64;
 
 /// The value of a condition; `Err` says what is wrong with it.
 pub fn eval_condition(expr: &str, macros: &Macros) -> Result<i64, String> {
@@ -15,6 +19,7 @@ pub fn eval_condition(expr: &str, macros: &Macros) -> Result<i64, String> {
         at: 0,
         real,
         quiet: false,
+        depth: 0,
     };
     let value = parser.binary(0)?;
     match parser.tokens.get(parser.at) {
@@ -195,7 +200,9 @@ const OPS: [&str; 22] = [
 ];
 
 fn tokens(expr: &str, macros: &Macros) -> Result<(Vec<Token>, bool), String> {
-    let expanded = macros.expand(expr);
+    let expanded = macros
+        .expand_bounded(expr)
+        .ok_or_else(|| format!("its macros make more than {MAX_EXPANSION} tokens"))?;
     let mut out = Vec::new();
     let mut real = false;
     let mut rest = expanded.trim_start();
@@ -265,6 +272,8 @@ struct Parser<'a> {
     real: bool,
     /// Inside a side that `&&` / `||` skips: a division by zero is not an error.
     quiet: bool,
+    /// The operands being read, one inside another for each bracket and unary operator.
+    depth: usize,
 }
 
 /// Binary operators from the loosest to the tightest (GLSL §5.1 / §3.3).
@@ -311,6 +320,18 @@ impl Parser<'_> {
     }
 
     fn unary(&mut self) -> Result<f64, String> {
+        self.depth += 1;
+        if self.depth > MAX_NESTING {
+            return Err(format!(
+                "brackets and unary operators nest more than {MAX_NESTING} deep"
+            ));
+        }
+        let value = self.operand();
+        self.depth -= 1;
+        value
+    }
+
+    fn operand(&mut self) -> Result<f64, String> {
         match self.next() {
             Some(Token::Num(n)) => Ok(n),
             Some(Token::Op("(")) => {

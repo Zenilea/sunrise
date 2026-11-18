@@ -59,6 +59,15 @@ struct Macro {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Macros(BTreeMap<String, Macro>);
 
+/// The most one expansion may make: each macro it replaces counts one, and each token of the
+/// replacement one, plus one for each name that token hides. Past it the expansion stops, so a
+/// pack's macros are bounded before what they make is held (macros that each use the next twice
+/// double the text at every level).
+pub(crate) const MAX_EXPANSION: usize = 1 << 18;
+
+/// How deep calls may nest in calls' arguments, each expanded by recursion before the call.
+const MAX_CALL_DEPTH: usize = 64;
+
 /// `MC_RENDER_STAGE_*` in the order the stages draw (spec 5.4); each is its index (OQ-7).
 pub const RENDER_STAGES: [&str; 24] = [
     "NONE",
@@ -251,7 +260,8 @@ impl Macros {
     /// Whether upcoming source lines continue a call, including one whose expanded name
     /// ends `text` and whose opening parenthesis is on the next nonempty line.
     pub(crate) fn unfinished_call(&self, text: &str, upcoming: &[&str]) -> bool {
-        let (tokens, unfinished) = self.expand_tokens(expansion_tokens(text));
+        let mut budget = MAX_EXPANSION;
+        let (tokens, unfinished) = self.expand_tokens(expansion_tokens(text), &mut budget, 0);
         unfinished
             || (tokens.iter().rfind(|t| !t.blank()).is_some_and(|t| {
                 self.0.get_key_value(&t.text).is_some_and(|(name, m)| {
@@ -266,22 +276,33 @@ impl Macros {
 
     /// `text` with every macro expanded, repeatedly; a macro is not expanded again inside its own
     /// expansion, so `A` defined as `A + 1` stops. Function-like macros take their arguments
-    /// (expanded first, raw beside `##`, which pastes) when a `(` follows their name.
-    pub fn expand(&self, text: &str) -> String {
-        self.expand_tokens(expansion_tokens(text))
-            .0
-            .iter()
-            .map(|t| t.text.as_str())
-            .collect()
+    /// (expanded first, raw beside `##`, which pastes) when a `(` follows their name. `None` when
+    /// the expansion gets past [`MAX_EXPANSION`].
+    pub fn expand_bounded(&self, text: &str) -> Option<String> {
+        let mut budget = MAX_EXPANSION;
+        let tokens = self.expand_tokens(expansion_tokens(text), &mut budget, 0).0;
+        (budget > 0).then(|| tokens.iter().map(|t| t.text.as_str()).collect())
     }
 
+    /// [`Macros::expand_bounded`], or `text` as it is when the expansion gets past the bound.
+    pub fn expand(&self, text: &str) -> String {
+        self.expand_bounded(text).unwrap_or_else(|| text.to_owned())
+    }
+
+    /// The expansion of `tokens`, an argument `depth` calls deep, spending `budget`; it stops
+    /// where it is when the budget runs out or the calls nest too deep, and leaves it at 0.
     fn expand_tokens<'a>(
         &'a self,
         mut tokens: Vec<ExpansionToken<'a>>,
+        budget: &mut usize,
+        depth: usize,
     ) -> (Vec<ExpansionToken<'a>>, bool) {
+        if depth > MAX_CALL_DEPTH {
+            *budget = 0;
+        }
         let mut i = 0;
         let mut unfinished = false;
-        while i < tokens.len() {
+        while i < tokens.len() && *budget > 0 {
             let Some((name, m)) = self.0.get_key_value(tokens[i].text.as_str()) else {
                 i += 1;
                 continue;
@@ -302,13 +323,25 @@ impl Macros {
                         i += 1;
                         continue;
                     };
+                    // The arguments are copies, expanded by recursion: paid for first.
+                    if !spend(budget, args.iter().map(Vec::len).sum()) {
+                        break;
+                    }
                     // A call can cross a replacement boundary. Only disabling shared by
                     // its name and closing parenthesis carries into the new replacement.
                     hidden.retain(|h| tokens[next - 1].hidden.contains(h));
-                    (self.substitute(params, &args, &m.body), next)
+                    let Some(body) = self.substitute(params, &args, &m.body, budget, depth) else {
+                        *budget = 0;
+                        break;
+                    };
+                    (body, next)
                 }
             };
             hidden.push(name);
+            // The replacement and the names each of its tokens will hide.
+            if !spend(budget, 1 + body.len() * (1 + hidden.len())) {
+                break;
+            }
             for token in &mut body {
                 for h in &hidden {
                     if !token.hidden.contains(h) {
@@ -323,13 +356,16 @@ impl Macros {
         (tokens, unfinished)
     }
 
-    /// A function-like macro's body with its parameters replaced.
+    /// A function-like macro's body with its parameters replaced, for a call `depth` calls deep;
+    /// `None` when that alone gets past `budget`, which the arguments' own expansions spend.
     fn substitute<'a>(
         &'a self,
         params: &[String],
         args: &[Vec<ExpansionToken<'a>>],
         body: &str,
-    ) -> Vec<ExpansionToken<'a>> {
+        budget: &mut usize,
+        depth: usize,
+    ) -> Option<Vec<ExpansionToken<'a>>> {
         let tokens = lex(body);
         let pasted = |at: usize, step: isize| {
             let mut j = at as isize + step;
@@ -354,7 +390,11 @@ impl Macros {
                             out.extend(arg);
                         }
                     } else {
-                        out.extend(self.expand_tokens(arg).0);
+                        out.extend(self.expand_tokens(arg, budget, depth + 1).0);
+                    }
+                    // An argument used many times multiplies: bounded before it is held.
+                    if out.len() >= *budget {
+                        return None;
                     }
                 }
                 None => out.push(ExpansionToken::new(token)),
@@ -394,7 +434,7 @@ impl Macros {
         // `colors2_colorspaces_ ## a ## _to_ ## b ##(x)`) stays the tokens it is made of, as
         // GL drivers' preprocessors leave it: the name before the `(` is then rescanned and can
         // call a macro.
-        joined
+        let joined = joined
             .into_iter()
             .flat_map(|token| {
                 let parts = lex(&token.text);
@@ -409,7 +449,23 @@ impl Macros {
                     })
                     .collect()
             })
-            .collect()
+            .collect();
+        Some(joined)
+    }
+}
+
+/// Takes `cost` from `budget`, or empties it when `cost` does not fit: an empty budget is an
+/// expansion that stopped.
+fn spend(budget: &mut usize, cost: usize) -> bool {
+    match budget.checked_sub(cost) {
+        Some(left) if left > 0 => {
+            *budget = left;
+            true
+        }
+        _ => {
+            *budget = 0;
+            false
+        }
     }
 }
 

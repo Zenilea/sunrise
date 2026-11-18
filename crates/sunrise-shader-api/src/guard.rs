@@ -20,7 +20,9 @@
 //! GLSL, which naga's GLSL front end reads (resource packs' core and post shaders, OptiFine-format
 //! shader packs), is bounded by [`glsl_refusal`] the same way, but naga limits no nesting there:
 //! brackets, unary operators and statements without braces count too ([`MAX_GLSL_NESTING`]),
-//! and packs' programs may be longer ([`MAX_GLSL_BYTES`]).
+//! and packs' programs may be longer ([`MAX_GLSL_BYTES`]). The check reads the text naga's parser
+//! will: callers preprocess it first (includes, `#define`s and `#if`s, each bounded as it runs),
+//! and a directive naga's own preprocessor would still act on is refused.
 
 /// The most bytes of WGSL a shader (the prelude, the files and the entry points as composed)
 /// may hold.
@@ -31,10 +33,10 @@ pub const MAX_SOURCE_BYTES: usize = 128 * 1024;
 /// parse it allows takes about a megabyte of a debug build's stack.
 pub const MAX_CHAINED_OPERATORS: usize = 200;
 
-/// The most bytes of GLSL a stage may hold as naga reads it: includes pasted and, in an
-/// OptiFine-format pack, its macros expanded. Generous, four times what a core shader's includes
-/// may grow to, so that no real pack meets it: the other bounds hold whatever the length, and
-/// this one only bounds the work.
+/// The most bytes of GLSL a stage may hold as naga reads it: includes pasted and macros expanded.
+/// Preprocessing stops at it as it goes, so it bounds the memory and the work a stage takes; the
+/// other bounds hold whatever the length. Four times what a core shader's includes may grow to.
+/// It was not measured against real packs' programs: a stage longer than it is refused.
 pub const MAX_GLSL_BYTES: usize = 4 << 20;
 
 /// How deep GLSL's brackets, unary operators and statements without braces may nest. naga's GLSL
@@ -46,46 +48,77 @@ pub const MAX_GLSL_NESTING: usize = 200;
 /// it is used.
 const STACK_BYTES: usize = 64 << 20;
 
+/// Why a shader may not be parsed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Refusal {
+    pub excess: Excess,
+    /// The byte offset it is found at; `None` for a shader too long.
+    pub at: Option<usize>,
+    pub message: String,
+}
+
+/// The bound a shader gets past.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Excess {
+    /// It is longer than the cap ([`MAX_SOURCE_BYTES`], [`MAX_GLSL_BYTES`]).
+    Bytes,
+    /// An expression chains more than [`MAX_CHAINED_OPERATORS`] operators.
+    Chain,
+    /// GLSL nests deeper than [`MAX_GLSL_NESTING`].
+    Nesting,
+    /// A directive naga's GLSL preprocessor would act on is left in the text.
+    Directive,
+}
+
 /// Why `text` may not be parsed, and the byte offset it is found at when it has one: it is too
 /// long, or an expression chains more than [`MAX_CHAINED_OPERATORS`] operators.
 pub fn refusal(text: &str) -> Option<(Option<usize>, String)> {
-    refusal_as(text, MAX_SOURCE_BYTES, false)
+    refusal_as(text, MAX_SOURCE_BYTES, false).map(|r| (r.at, r.message))
 }
 
-/// [`refusal`] for GLSL: longer than [`MAX_GLSL_BYTES`], an expression chaining more than
-/// [`MAX_CHAINED_OPERATORS`] operators (a ternary's `?` among them), or nesting deeper than
-/// [`MAX_GLSL_NESTING`]. Comments are read as GLSL's, which don't nest. naga's preprocessor is
-/// not run: directive lines are skipped, a macro counts as the word that names it and code an
-/// `#if` leaves out counts all the same, so text a preprocessor of ours expanded first (as
-/// OptiFine-format packs' is) is bounded as naga sees it, and other text as it is written.
-pub fn glsl_refusal(text: &str) -> Option<(Option<usize>, String)> {
+/// [`refusal`] for GLSL as naga's parser reads it, preprocessed: longer than [`MAX_GLSL_BYTES`],
+/// an expression chaining more than [`MAX_CHAINED_OPERATORS`] operators (a ternary's `?` among
+/// them), nesting deeper than [`MAX_GLSL_NESTING`], or holding a directive naga's preprocessor
+/// would act on (any but `#version`, `#extension`, `#pragma` and `#line` at the start of a line),
+/// since what that expands or leaves out is not what was counted. Comments are read as GLSL's,
+/// which don't nest.
+pub fn glsl_refusal(text: &str) -> Option<Refusal> {
     refusal_as(text, MAX_GLSL_BYTES, true)
 }
 
-fn refusal_as(text: &str, max_bytes: usize, glsl: bool) -> Option<(Option<usize>, String)> {
+fn refusal_as(text: &str, max_bytes: usize, glsl: bool) -> Option<Refusal> {
     if text.len() > max_bytes {
-        return Some((
-            None,
-            format!(
+        return Some(Refusal {
+            excess: Excess::Bytes,
+            at: None,
+            message: format!(
                 "{} bytes of shader; a shader may hold {max_bytes}",
                 text.len()
             ),
-        ));
+        });
     }
-    first_excess(text, glsl).map(|(at, message)| (Some(at), message))
+    first_excess(text, glsl).map(|(at, excess, message)| Refusal {
+        excess,
+        at: Some(at),
+        message,
+    })
 }
 
 /// Where `text` first gets past a bound (its byte offset), and which: an expression chains more
 /// than [`MAX_CHAINED_OPERATORS`] binary operators, member accesses or indexings, or, in GLSL,
-/// nests deeper than [`MAX_GLSL_NESTING`]. An expression is what lies between `;`, `{` and `}`,
-/// which no expression contains. Comments and numbers are read as naga reads them, so that
-/// nothing naga takes for an operator is hidden from the count; what it counts beyond them (such
-/// as the angle brackets of a template) only makes the bound stricter.
-fn first_excess(text: &str, glsl: bool) -> Option<(usize, String)> {
+/// nests deeper than [`MAX_GLSL_NESTING`] or holds a directive that changes code. An expression is
+/// what lies between `;`, `{` and `}`, which no expression contains. Comments and numbers are read
+/// as naga reads them, so that nothing naga takes for an operator is hidden from the count; what
+/// it counts beyond them (such as the angle brackets of a template) only makes the bound stricter.
+fn first_excess(text: &str, glsl: bool) -> Option<(usize, Excess, String)> {
     let mut chars = text.char_indices().peekable();
     let (mut count, mut after_operand) = (0, false);
     let mut nesting = Nesting::default();
+    // Only blank space since the line began: where a directive may start.
+    let mut line_start = true;
     while let Some((at, c)) = chars.next() {
+        let directive_may_start = line_start;
+        line_start = is_line_end(c) || (line_start && is_blank(c));
         match c {
             '/' if chars.peek().is_some_and(|(_, n)| *n == '/') => {
                 while chars.next_if(|(_, n)| !is_line_end(*n)).is_some() {}
@@ -114,8 +147,26 @@ fn first_excess(text: &str, glsl: bool) -> Option<(usize, String)> {
                 }
                 continue;
             }
-            // A preprocessor directive, which is no code; naga's preprocessor is not run.
+            // A directive that changes no code is skipped; any other would change what naga
+            // parses after this count.
             '#' if glsl => {
+                let rest = text[at + 1..].trim_start_matches([' ', '\t']);
+                let end = rest
+                    .find(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+                    .unwrap_or(rest.len());
+                let word = &rest[..end];
+                if !directive_may_start
+                    || !matches!(word, "version" | "extension" | "pragma" | "line")
+                {
+                    return Some((
+                        at,
+                        Excess::Directive,
+                        format!(
+                            "`#{word}` is left for naga's preprocessor, which would change the \
+                             code after this check"
+                        ),
+                    ));
+                }
                 while chars.next_if(|(_, n)| !is_line_end(*n)).is_some() {}
                 continue;
             }
@@ -162,6 +213,7 @@ fn first_excess(text: &str, glsl: bool) -> Option<(usize, String)> {
                     let split = if glsl { "a variable" } else { "`let`" };
                     return Some((
                         at,
+                        Excess::Chain,
                         format!(
                             "an expression chains more than {MAX_CHAINED_OPERATORS} operators \
                              ({count} here); split it with {split}"
@@ -187,6 +239,7 @@ fn first_excess(text: &str, glsl: bool) -> Option<(usize, String)> {
         if glsl && nesting.depth > MAX_GLSL_NESTING {
             return Some((
                 at,
+                Excess::Nesting,
                 format!(
                     "brackets, unary operators and statements nest more than {MAX_GLSL_NESTING} \
                      deep ({} here)",
@@ -204,59 +257,103 @@ fn first_excess(text: &str, glsl: bool) -> Option<(usize, String)> {
 #[derive(Default)]
 struct Nesting {
     depth: usize,
-    /// The current level's unary operators and statements still open.
+    /// The current level's unary operators still open.
     unary: usize,
-    statements: usize,
-    /// The statements the last `;` or `}` ended, open again if `else` or a `do`'s `while` follows.
-    ended: usize,
+    /// The current level's statements still open, the innermost last.
+    statements: Vec<Statement>,
+    /// A `;` or `}` ended a statement: which of the open ones end with it depends on what comes
+    /// next ([`Nesting::settle`]).
+    ended: bool,
     /// The unary operators and statements of the level outside each open bracket.
-    outer: Vec<(usize, usize)>,
+    outer: Vec<(usize, Vec<Statement>)>,
+}
+
+#[derive(Clone, Copy)]
+enum Statement {
+    /// An `if` whose body may still be followed by its `else`.
+    If,
+    /// A `do` whose `while` has not come yet.
+    Do,
+    /// A loop, a `switch`, an `if` in its `else`, a `do` in its `while`.
+    Other,
 }
 
 impl Nesting {
     fn open(&mut self) {
-        self.outer.push((self.unary, self.statements));
-        (self.unary, self.statements, self.ended) = (0, 0, 0);
+        self.settle(None);
+        let statements = std::mem::take(&mut self.statements);
+        self.outer.push((self.unary, statements));
+        self.unary = 0;
         self.depth += 1;
     }
 
     fn close(&mut self) {
-        let level = 1 + self.unary + self.statements;
+        self.settle(None);
+        let level = 1 + self.unary + self.statements.len();
         // An unmatched closer, which naga refuses, never takes the count below zero.
         self.depth = self.depth.saturating_sub(level);
         (self.unary, self.statements) = self.outer.pop().unwrap_or_default();
-        self.ended = 0;
     }
 
     fn unary(&mut self) {
+        self.settle(None);
         self.unary += 1;
         self.depth += 1;
     }
 
     /// An operand: the unary operators before it are done.
     fn operand(&mut self) {
-        self.depth -= self.unary;
-        self.unary = 0;
+        self.settle(None);
+        self.depth -= std::mem::take(&mut self.unary);
     }
 
+    /// A `;`, or a `}` that ended a block. A `;` right after a `}` (an initializer's) ends
+    /// nothing more: the statements wait for what follows it.
     fn end_statement(&mut self) {
-        self.operand();
-        self.depth -= self.statements;
-        // `+=`: the `;` after an initializer's `}` leaves what the `}` ended open to `else`.
-        self.ended += std::mem::take(&mut self.statements);
+        self.depth -= std::mem::take(&mut self.unary);
+        self.ended = true;
     }
 
     fn word(&mut self, word: &str) {
-        if matches!(word, "else" | "while") {
-            self.statements += self.ended;
-            self.depth += self.ended;
-        }
-        self.ended = 0;
-        if matches!(word, "if" | "for" | "while" | "do" | "switch") {
-            self.statements += 1;
+        let tail = self.settle(Some(word));
+        if !tail && matches!(word, "if" | "for" | "while" | "do" | "switch") {
+            self.statements.push(match word {
+                "if" => Statement::If,
+                "do" => Statement::Do,
+                _ => Statement::Other,
+            });
             self.depth += 1;
         }
         self.operand();
+    }
+
+    /// Ends what the last `;` or `}` ended, now that `next` (a word; `None` for any other token)
+    /// shows which: from the innermost out, every open statement ends, except an `if` that `else`
+    /// follows and a `do`, which waits for its `while`. Nothing else stays open, so loops one
+    /// after another do not nest. `true` when `next` is a `do`'s `while`, which opens no loop.
+    fn settle(&mut self, next: Option<&str>) -> bool {
+        if !std::mem::take(&mut self.ended) {
+            return false;
+        }
+        while let Some(last) = self.statements.last_mut() {
+            match (*last, next) {
+                (Statement::If, Some("else")) => {
+                    *last = Statement::Other;
+                    return false;
+                }
+                (Statement::Do, Some("while")) => {
+                    *last = Statement::Other;
+                    return true;
+                }
+                // naga refuses a `do`'s body followed by anything but `while`.
+                (Statement::Do, _) => return false,
+                _ => {
+                    self.statements.pop();
+                    self.depth -= 1;
+                }
+            }
+        }
+        false
     }
 }
 
@@ -451,14 +548,17 @@ mod tests {
     fn glsl_brackets_nest_up_to_the_cap_exactly() {
         let parens = |n: usize| format!("float x = {}a{};", "(".repeat(n), ")".repeat(n));
         assert_eq!(glsl_refusal(&parens(MAX_GLSL_NESTING)), None);
-        let (at, message) = glsl_refusal(&parens(MAX_GLSL_NESTING + 1)).unwrap();
+        let refused = |text: &str| glsl_refusal(text).map(|r| (r.excess, r.at));
         // The 201st `(`, after `float x = ` (10 bytes).
-        assert_eq!(at, Some(10 + MAX_GLSL_NESTING));
-        assert!(message.contains("201 here"), "{message}");
+        let at = Some(10 + MAX_GLSL_NESTING);
+        assert_eq!(
+            refused(&parens(MAX_GLSL_NESTING + 1)),
+            Some((Excess::Nesting, at))
+        );
         let long = format!("{}// {}", parens(3), "x".repeat(MAX_SOURCE_BYTES));
         assert_eq!(glsl_refusal(&long), None);
         let longer = " ".repeat(MAX_GLSL_BYTES + 1);
-        assert_eq!(glsl_refusal(&longer).map(|(at, _)| at), Some(None));
+        assert_eq!(refused(&longer), Some((Excess::Bytes, None)));
     }
 
     /// Unary operators wait for their operand, and statements without braces for their end (an
@@ -483,8 +583,8 @@ mod tests {
             ),
         ];
         for body in deep {
-            let (_, message) = glsl_refusal(&main(body)).unwrap();
-            assert!(message.contains("nest more than"), "{message}");
+            let excess = glsl_refusal(&main(body)).map(|r| r.excess);
+            assert_eq!(excess, Some(Excess::Nesting));
         }
         let flat = [
             format!(
@@ -504,6 +604,64 @@ mod tests {
         }
     }
 
+    /// Only a statement still waiting for its end is a level: a loop that ended is not reopened
+    /// by the next `while` (only a `do` waits for one), so a long run of loops one after another
+    /// stays flat, and `do`s nested within the cap pass.
+    #[test]
+    fn glsl_successive_loops_do_not_nest() {
+        let main = |body: String| format!("void main() {{ float a = 1.0, x; {body} }}");
+        let flat = [
+            "while (x < 1.0) x += a; ".repeat(1000),
+            "while (x < 1.0) { x += a; } ".repeat(1000),
+            "do x += a; while (x < 1.0); while (x < 2.0) x += a; ".repeat(1000),
+            "if (a > 0.0) x = 1.0; while (x < 1.0) x += a; ".repeat(1000),
+            format!(
+                "{}x += a;{}",
+                "do ".repeat(150),
+                " while (x < 1.0);".repeat(150)
+            ),
+            format!(
+                "{}x += a;{} ",
+                "do { ".repeat(90),
+                " } while (x < 1.0);".repeat(90)
+            )
+            .repeat(20),
+        ];
+        for body in flat {
+            assert_eq!(glsl_refusal(&main(body)), None);
+        }
+    }
+
+    /// What naga's preprocessor would act on is refused, not skipped: a `#define` or `#if` left in
+    /// the text would change what naga parses after the count. `#version`, `#extension`, `#pragma`
+    /// and `#line` at the start of a line change no code and are skipped.
+    #[test]
+    fn glsl_directives_naga_would_act_on_are_refused() {
+        let kept = "#version 450 core\n  #extension GL_X : enable\n#pragma optimize(on)\n\
+                    #line 4\nvoid main() {}";
+        assert_eq!(glsl_refusal(kept), None);
+        let define = format!(
+            "#version 450\n#define T a{}\nfloat x = T;",
+            "+a".repeat(150)
+        );
+        let refused = |text: &str| glsl_refusal(text).map(|r| (r.excess, r.at));
+        // The `#` of the second line.
+        assert_eq!(refused(&define), Some((Excess::Directive, Some(13))));
+        for text in [
+            "#if 0\n#endif",
+            "#ifdef A\n#endif",
+            "  # define A",
+            "#undef A",
+            "#include <a.glsl>",
+            "#",
+            // Not at the start of a line: no directive of naga's starts there.
+            "float x = 1.0; #version 450",
+        ] {
+            let excess = glsl_refusal(text).map(|r| r.excess);
+            assert_eq!(excess, Some(Excess::Directive), "{text}");
+        }
+    }
+
     /// A GLSL comment ends at its first `*/` (a WGSL one nests): what follows is code, counted.
     #[test]
     fn glsl_comments_do_not_nest() {
@@ -512,8 +670,9 @@ mod tests {
             "+a".repeat(MAX_CHAINED_OPERATORS)
         );
         assert_eq!(refusal(&source), None);
-        let (_, message) = glsl_refusal(&source).unwrap();
-        assert!(message.contains("201 here"), "{message}");
+        // The 200th `+` (the `=` is the first operator), after `/* /* */ float x = a`.
+        let refused = glsl_refusal(&source).map(|r| (r.excess, r.at));
+        assert_eq!(refused, Some((Excess::Chain, Some(20 + 2 * 199))));
     }
 
     #[test]

@@ -55,7 +55,7 @@ pub use post::{
     ImageSize, Post, PostProgram, STARS_BLEND, ShadowCulling, TRANSLUCENT_BLEND, dimension_folder,
     dimension_folder_named, load_post,
 };
-pub use preprocess::{Diagnostic, Origin, Preprocessed, preprocess};
+pub use preprocess::{Diagnostic, Origin, Preprocessed, preprocess, preprocess_text};
 pub use properties::{Entry, Note, Properties};
 pub use screens::{Item as ScreenItem, Screens};
 pub use textures::{

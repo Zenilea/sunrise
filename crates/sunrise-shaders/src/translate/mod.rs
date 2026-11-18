@@ -1152,14 +1152,21 @@ fn work_group_size(code: &str) -> Result<String, String> {
 
 /// A work group size given as an integer constant expression (GLSL 4.60, 4.4 and 4.4.1):
 /// numbers, `+ - * / %`, brackets, `min`, `max` and `gl_MaxComputeWorkGroupSize`, the minimum
-/// GLSL requires (`ivec3(1024, 1024, 64)`, 7.3); the translation knows no device.
+/// GLSL requires (`ivec3(1024, 1024, 64)`, 7.3); the translation knows no device. At most
+/// [`MAX_SIZE_WORDS`] words: it is read by recursion, before the guard sees the stage.
 struct ConstantSize<'w> {
     words: &'w [&'w str],
     at: usize,
 }
 
+/// The most words a work group size may hold, which bounds how deep its evaluation recurses.
+const MAX_SIZE_WORDS: usize = 64;
+
 impl<'w> ConstantSize<'w> {
     fn eval(words: &'w [&'w str]) -> Option<u32> {
+        if words.len() > MAX_SIZE_WORDS {
+            return None;
+        }
         let mut p = Self { words, at: 0 };
         let v = p.sum()?;
         (p.at == words.len())
@@ -1307,15 +1314,6 @@ fn compile_here(
     text: &str,
     header_lines: usize,
 ) -> Result<naga::Module, Vec<Error>> {
-    let specialized = image_parameters::rewrite(text).map_err(|message| {
-        vec![Error {
-            file: stage.pp.files.first().cloned().unwrap_or_default(),
-            line: 1,
-            message,
-        }]
-    })?;
-    let bounded = integer_bounds::rewrite(&array_constructors::rewrite(&specialized));
-    let text = bounded.as_str();
     let at = |text: &str, span: naga::Span, message: String| {
         let start = span.to_range().map_or(0, |r| r.start);
         let line = text[..start.min(text.len())].matches('\n').count();
@@ -1340,11 +1338,36 @@ fn compile_here(
             },
         }
     };
-    // naga's GLSL front end has no bound of its own on how deep it recurses.
-    if let Some((offset, message)) = guard::glsl_refusal(text) {
-        let offset = offset.unwrap_or(0) as u32;
-        return Err(vec![at(text, naga::Span::new(offset, offset), message)]);
+    // naga's GLSL front end has no bound of its own on how deep it recurses: each text it is
+    // given, the rewrites below too, is checked first, and so is the stage before the rewrites,
+    // as `image_parameters` recurses into calls' arguments.
+    let refused = |text: &str| {
+        let refusal = guard::glsl_refusal(text)?;
+        Some(vec![match refusal.at {
+            Some(offset) => {
+                let offset = naga::Span::new(offset as u32, offset as u32);
+                at(text, offset, refusal.message)
+            }
+            // The whole stage: its file.
+            None => Error {
+                file: stage.pp.files.first().cloned().unwrap_or_default(),
+                line: 0,
+                message: refusal.message,
+            },
+        }])
+    };
+    if let Some(errors) = refused(text) {
+        return Err(errors);
     }
+    let specialized = image_parameters::rewrite(text).map_err(|message| {
+        vec![Error {
+            file: stage.pp.files.first().cloned().unwrap_or_default(),
+            line: 1,
+            message,
+        }]
+    })?;
+    let bounded = integer_bounds::rewrite(&array_constructors::rewrite(&specialized));
+    let text = bounded.as_str();
     let parse = |text: &str| {
         Frontend::default()
             .parse(&Options::from(stage.kind), text)
@@ -1363,6 +1386,9 @@ fn compile_here(
     let mut tries = 0;
     let mut module = loop {
         tries += 1;
+        if let Some(errors) = refused(&text) {
+            return Err(errors);
+        }
         match Frontend::default().parse(&Options::from(stage.kind), &text) {
             Ok(m) => break m,
             Err(e) => match e.errors.iter().find_map(|e| {
@@ -1726,6 +1752,62 @@ mod tests {
                 .any(|e| e.message.contains("chains more than")),
             "{errors:?}"
         );
+    }
+
+    /// A stage the translation makes longer than the guard's byte cap is refused at the pack's
+    /// stage file, not at a line of Sunrise's own header (`<sunrise>`).
+    #[test]
+    fn an_oversize_stage_is_refused_at_its_file() {
+        let pad = format!(
+            "const float {} = 1.0;",
+            "a".repeat(guard::MAX_GLSL_BYTES - 512)
+        );
+        let Err(errors) = item_program("gbuffers_hand", &pad, "1.0", &item_game()) else {
+            panic!("translated");
+        };
+        let at: Vec<(&str, u32)> = errors.iter().map(|e| (e.file.as_str(), e.line)).collect();
+        assert_eq!(at, [("gbuffers_hand.fsh", 0)]);
+    }
+
+    /// The stage is checked before the rewrites that read it by recursion (`image_parameters`
+    /// follows calls into their arguments): a call nested past the bound is refused at its
+    /// line, not by the rewrite at the stage's first.
+    #[test]
+    fn a_stage_is_checked_before_its_rewrites() {
+        let decl = format!(
+            "layout(r32ui) uniform uimage2D colorimg4;\n\
+             float f(uimage2D image, float v) {{ return v; }}\n\
+             float g() {{ return f(other, {}1.0{}); }}",
+            "(".repeat(300),
+            ")".repeat(300)
+        );
+        let Err(errors) = item_program("gbuffers_hand", &decl, "g()", &item_game()) else {
+            panic!("translated");
+        };
+        let at: Vec<(&str, u32)> = errors.iter().map(|e| (e.file.as_str(), e.line)).collect();
+        assert_eq!(at, [("gbuffers_hand.fsh", 4)]);
+    }
+
+    /// A work group size is evaluated by recursion, before naga or the guard read the stage:
+    /// a size nested deeper than any real one is not a size, on a 2 MiB thread, never a stack
+    /// overflow.
+    #[test]
+    fn a_work_group_size_nested_too_deep_is_refused() {
+        let sizes = std::thread::Builder::new()
+            .stack_size(2 << 20)
+            .spawn(|| {
+                [
+                    format!("{}8{}", "(".repeat(100_000), ")".repeat(100_000)),
+                    format!("{}8", "- ".repeat(100_000)),
+                ]
+                .map(|size| work_group_size(&format!("layout(local_size_x = {size}) in;\n")))
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+        for size in sizes {
+            assert!(size.is_err());
+        }
     }
 
     #[test]

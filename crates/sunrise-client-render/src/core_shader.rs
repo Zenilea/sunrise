@@ -11,7 +11,10 @@
 //!   into a texture and a sampler object, combined again where the sampler is named;
 //! - the vertex inputs become globals the caller's [`Glue`] fills before the pack's `main`
 //!   (renamed `hz_main`) runs, and `gl_VertexID` and `gl_VertexIndex` read the glue's expression;
-//! - varyings get locations by name across the stages, the fragment output location 0.
+//! - varyings get locations by name across the stages, the fragment output location 0;
+//! - the defines and the pack's `#define`s and `#if`s are applied by the shader packs'
+//!   preprocessor, bounded, and what naga will parse is checked by the shader guard first
+//!   ([`preprocessed`]): naga recurses over the shape of the code with no limit of its own.
 
 use std::collections::HashSet;
 use std::fmt::Write;
@@ -586,6 +589,40 @@ fn rename_main(text: &str) -> String {
     out
 }
 
+/// `code` (its `#version` line first) as naga's GLSL front end is to read it: `defines` (`NAME`
+/// or `NAME value`) and its own `#define`s applied and its conditionals chosen, by the
+/// preprocessor shader packs go through (bounded as it runs), then checked by
+/// [`guard::glsl_refusal`]. naga's own preprocessor then finds nothing to expand that the check
+/// did not count. The lines stay `code`'s, and errors name them.
+pub(crate) fn preprocessed(code: &str, defines: &[&str]) -> Result<String, String> {
+    let mut macros = sunrise_shaders::Macros::default();
+    for define in defines {
+        let (name, value) = define.split_once(' ').unwrap_or((define, ""));
+        macros.define(name, value);
+    }
+    let pp = sunrise_shaders::preprocess_text(code, &macros);
+    if let Some(d) = pp.diagnostics.iter().chain(&pp.warnings).next() {
+        return Err(format!("line {}: {}", d.origin.line, d.message));
+    }
+    // The `#version` line, taken out with the other directives, is put back as it was.
+    let version = code
+        .lines()
+        .next()
+        .filter(|line| line.trim_start().starts_with("#version"))
+        .unwrap_or("");
+    let text = format!("{version}{}", pp.code);
+    match guard::glsl_refusal(&text) {
+        Some(refusal) => Err(match refusal.at {
+            Some(at) => {
+                let line = text[..at].matches('\n').count() + 1;
+                format!("line {line}: {}", refusal.message)
+            }
+            None => refusal.message,
+        }),
+        None => Ok(text),
+    }
+}
+
 /// Parses and validates one stage; errors name the line of the rewritten code.
 fn compile(
     stage: ShaderStage,
@@ -594,14 +631,8 @@ fn compile(
     names: &Names,
     provided: &dyn Fn(&str) -> bool,
 ) -> Result<naga::Module, String> {
-    let mut options = Options::from(stage);
-    for define in defines {
-        let (name, value) = define.split_once(' ').unwrap_or((define, ""));
-        options.defines.insert(name.to_owned(), value.to_owned());
-    }
-    if let Some((_, reason)) = guard::glsl_refusal(code) {
-        return Err(reason);
-    }
+    let code = &preprocessed(code, defines)?;
+    let options = Options::from(stage);
     let module = guard::guarded(|| Frontend::default().parse(&options, code))?.map_err(|e| {
         e.errors
             .iter()
@@ -737,8 +768,9 @@ mod tests {
 
     /// naga's GLSL front end recurses once per term of an operator chain and once per level of
     /// nesting, with no limit of its own, and a stack overflow ends the process: a pack's shader
-    /// that deep is refused before naga parses it. Each runs on a 2 MiB thread, so one the guard
-    /// let through fails at once.
+    /// that deep is refused before naga parses it, at the line naga reads it on (the pack's line
+    /// 7 is line 8 there, under the rewrite's `#version`). Each runs on a 2 MiB thread, so one the
+    /// guard let through fails at once.
     #[test]
     fn shaders_too_deep_for_naga_are_refused() {
         let translate = |statement: String| {
@@ -755,21 +787,24 @@ mod tests {
                 .join()
                 .unwrap()
         };
+        // #2546's case: a chain of 199 terms used 199 times through a `#define` is under the cap
+        // as written and 39 601 terms as naga reads it: refused at the line that uses it.
+        let define = format!(
+            "#define T a{}\n    x = T{};",
+            "+a".repeat(198),
+            "+T".repeat(198)
+        );
+        let error = translate(define).unwrap_err();
+        assert!(error.starts_with("fragment shader: line 9: "), "{error}");
         let deep = [
-            (format!("x = a{};", "+a".repeat(10_000)), "chains more than"),
-            (
-                format!("x = {}a{};", "(".repeat(10_000), ")".repeat(10_000)),
-                "nest more than",
-            ),
-            (format!("x = {}a;", "- ".repeat(10_000)), "nest more than"),
-            (
-                format!("{}x = 1.0;", "if (b) ".repeat(10_000)),
-                "nest more than",
-            ),
+            format!("x = a{};", "+a".repeat(10_000)),
+            format!("x = {}a{};", "(".repeat(10_000), ")".repeat(10_000)),
+            format!("x = {}a;", "- ".repeat(10_000)),
+            format!("{}x = 1.0;", "if (b) ".repeat(10_000)),
         ];
-        for (statement, reason) in deep {
+        for statement in deep {
             let error = translate(statement).unwrap_err();
-            assert!(error.contains(reason), "{error}");
+            assert!(error.starts_with("fragment shader: line 8: "), "{error}");
         }
         // What the bounds let through still translates.
         for statement in [
