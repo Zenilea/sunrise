@@ -8,11 +8,13 @@
 //! includes itself. `#version` and `#extension` are taken out of the code and kept apart: the
 //! translation writes its own header.
 //!
-//! A stage's code stops at [`MAX_STAGE_BYTES`] as it is read, and a line's macros at
-//! [`MAX_EXPANSION`]: what includes and macros multiply is bounded before it is held.
+//! A stage's code stops at [`MAX_STAGE_BYTES`] as it is read, and a line's macros (also a
+//! condition's, and those of a call's next lines looked for) at [`MAX_EXPANSION`] tokens and the
+//! bytes the stage has left: what includes and macros multiply is bounded before it is held.
 
 use std::collections::HashMap;
 
+use crate::Bound;
 use crate::Macros;
 use crate::Pack;
 use crate::condition::{Conditionals, split_directive};
@@ -151,7 +153,7 @@ impl Run<'_> {
                 while n < lines.len()
                     && n - first < MAX_CALL_LINES
                     && !lines[n].trim_start().starts_with('#')
-                    && self.macros.unfinished_call(&line, &lines[n..])
+                    && self.macros.unfinished_call(&line, &lines[n..], self.room())
                 {
                     line.push(' ');
                     line.push_str(lines[n]);
@@ -184,11 +186,16 @@ impl Run<'_> {
         let Some(after) = line.trim_start().strip_prefix('#') else {
             let code = if self.conditionals.active() {
                 self.macros.define("__LINE__", origin.line.to_string());
-                self.macros.expand_bounded(line).unwrap_or_else(|| {
-                    let message = format!("its macros make more than {MAX_EXPANSION} tokens");
-                    self.diagnose(origin, &message);
-                    String::new()
-                })
+                match self.macros.expand_bounded(line, self.room()) {
+                    Ok(code) => code,
+                    // The stage can't hold the line, refused before it is made.
+                    Err(Bound::Bytes) => return self.overflow(origin),
+                    Err(Bound::Tokens) => {
+                        let message = format!("its macros make more than {MAX_EXPANSION} tokens");
+                        self.diagnose(origin, &message);
+                        String::new()
+                    }
+                }
             } else {
                 String::new()
             };
@@ -198,7 +205,8 @@ impl Run<'_> {
         let Some((word, rest)) = split_directive(after) else {
             return self.diagnose(origin, &format!("unknown directive `#{}`", after.trim()));
         };
-        match self.conditionals.apply(word, rest, &self.macros) {
+        let room = self.room();
+        match self.conditionals.apply(word, rest, &self.macros, room) {
             // As Iris loads such a pack: the branch is skipped, the program kept.
             Err(e) if e.ends_with("read as false") => {
                 return self.out.warnings.push(Diagnostic { origin, message: e });
@@ -250,19 +258,31 @@ impl Run<'_> {
         }
     }
 
+    /// The bytes a line may still make: what the stage has left, less the line's break.
+    fn room(&self) -> usize {
+        MAX_STAGE_BYTES.saturating_sub(self.bytes + 1)
+    }
+
     /// Adds a line of code; past [`MAX_STAGE_BYTES`] it is diagnosed instead, once, and the run
     /// reads no further.
     fn emit(&mut self, code: String, origin: Origin) {
         if self.bytes > MAX_STAGE_BYTES {
             return;
         }
-        self.bytes += code.len() + 1;
-        if self.bytes > MAX_STAGE_BYTES {
-            let message = format!("the stage grows past {MAX_STAGE_BYTES} bytes here");
-            return self.diagnose(origin, &message);
+        if self.bytes + code.len() + 1 > MAX_STAGE_BYTES {
+            return self.overflow(origin);
         }
+        self.bytes += code.len() + 1;
         self.code.push(code);
         self.out.lines.push(origin);
+    }
+
+    /// The line at `origin` would take the stage past [`MAX_STAGE_BYTES`]: diagnosed, and the
+    /// run reads no further.
+    fn overflow(&mut self, origin: Origin) {
+        self.bytes = MAX_STAGE_BYTES + 1;
+        let message = format!("the stage grows past {MAX_STAGE_BYTES} bytes here");
+        self.diagnose(origin, &message);
     }
 
     fn diagnose(&mut self, origin: Origin, message: &str) {

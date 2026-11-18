@@ -70,8 +70,9 @@ fn read_source(root: &ResourceSource, id: &str, ext: &str) -> Result<String, Str
         .map_err(|e| format!("{file}: {e}"))
 }
 
-/// `src`, the file `id`, with its includes pasted into `out`, which stops at the stage's byte
-/// budget ([`guard::MAX_GLSL_BYTES`]) as it grows, naming the file being pasted then.
+/// `src`, the file `id`, with its includes pasted into `out`, which stays within the stage's
+/// byte budget ([`guard::MAX_GLSL_BYTES`]): a line that would pass it is refused before it is
+/// added, naming its file and line.
 fn include(
     root: &ResourceSource,
     src: &str,
@@ -82,9 +83,9 @@ fn include(
     if depth > 8 {
         return Err("#include nested too deep".into());
     }
-    for line in src.lines() {
+    for (n, line) in src.lines().enumerate() {
         let t = line.trim_start();
-        if let Some(rest) = t.strip_prefix("#include") {
+        let kept = if let Some(rest) = t.strip_prefix("#include") {
             let name = rest
                 .trim()
                 .trim_start_matches(['<', '"'])
@@ -96,15 +97,21 @@ fn include(
                 .read_to_string(&file)
                 .map_err(|e| format!("#include <{name}>: {file}: {e}"))?;
             include(root, &text, name, depth + 1, out)?;
-        } else if !(t.starts_with("#version") || t.starts_with("#extension")) {
+            ""
+        } else if t.starts_with("#version") || t.starts_with("#extension") {
             // Those two are written again below, for the translator.
-            out.push_str(line);
+            ""
+        } else {
+            line
+        };
+        if out.len() + kept.len() + 1 > guard::MAX_GLSL_BYTES {
+            let (line, max) = (n + 1, guard::MAX_GLSL_BYTES);
+            return Err(format!(
+                "{id}: line {line}: the stage grows past {max} bytes here"
+            ));
         }
+        out.push_str(kept);
         out.push('\n');
-        if out.len() > guard::MAX_GLSL_BYTES {
-            let max = guard::MAX_GLSL_BYTES;
-            return Err(format!("{id}: the stage grows past {max} bytes here"));
-        }
     }
     Ok(())
 }
@@ -344,7 +351,7 @@ mod tests {
     }
 
     /// Includes that fan out (64 of a file that includes 64 of another, three deep: 64 MB) stop
-    /// at the stage's byte budget as they are pasted, naming the file being pasted then.
+    /// at the stage's byte budget before passing it, naming the file and line being pasted.
     #[test]
     fn includes_that_fan_out_stop_at_the_budget() {
         use sunrise_assets::resource_source::Resource;
@@ -382,7 +389,7 @@ mod tests {
         let Err(error) = translate(&source, "custom:post/test", "custom:post/test") else {
             panic!("translated");
         };
-        assert!(error.starts_with("custom:c.glsl: "), "{error}");
+        assert!(error.starts_with("custom:c.glsl: line 1: "), "{error}");
     }
 
     #[test]

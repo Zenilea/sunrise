@@ -68,6 +68,10 @@ pub(crate) const MAX_EXPANSION: usize = 1 << 18;
 /// How deep calls may nest in calls' arguments, each expanded by recursion before the call.
 const MAX_CALL_DEPTH: usize = 64;
 
+/// The bytes an expansion may make when its caller holds it to nothing smaller: what naga may
+/// read of a stage.
+pub(crate) const MAX_EXPANSION_BYTES: usize = sunrise_shader_api::guard::MAX_GLSL_BYTES;
+
 /// `MC_RENDER_STAGE_*` in the order the stages draw (spec 5.4); each is its index (OQ-7).
 pub const RENDER_STAGES: [&str; 24] = [
     "NONE",
@@ -258,9 +262,10 @@ impl Macros {
     }
 
     /// Whether upcoming source lines continue a call, including one whose expanded name
-    /// ends `text` and whose opening parenthesis is on the next nonempty line.
-    pub(crate) fn unfinished_call(&self, text: &str, upcoming: &[&str]) -> bool {
-        let mut budget = MAX_EXPANSION;
+    /// ends `text` and whose opening parenthesis is on the next nonempty line. The expansion
+    /// looked at is held to `max_bytes`, as [`Macros::expand_bounded`]'s.
+    pub(crate) fn unfinished_call(&self, text: &str, upcoming: &[&str], max_bytes: usize) -> bool {
+        let mut budget = Budget::new(text, max_bytes);
         let (tokens, unfinished) = self.expand_tokens(expansion_tokens(text), &mut budget, 0);
         unfinished
             || (tokens.iter().rfind(|t| !t.blank()).is_some_and(|t| {
@@ -276,33 +281,42 @@ impl Macros {
 
     /// `text` with every macro expanded, repeatedly; a macro is not expanded again inside its own
     /// expansion, so `A` defined as `A + 1` stops. Function-like macros take their arguments
-    /// (expanded first, raw beside `##`, which pastes) when a `(` follows their name. `None` when
-    /// the expansion gets past [`MAX_EXPANSION`].
-    pub fn expand_bounded(&self, text: &str) -> Option<String> {
-        let mut budget = MAX_EXPANSION;
+    /// (expanded first, raw beside `##`, which pastes) when a `(` follows their name. `Err` names
+    /// the bound the expansion gets past: [`MAX_EXPANSION`] tokens, or `max_bytes`, which every
+    /// copy of text it makes is paid from before it is made, so the text is never longer.
+    pub fn expand_bounded(&self, text: &str, max_bytes: usize) -> Result<String, Bound> {
+        let mut budget = Budget::new(text, max_bytes);
+        if let Some(bound) = budget.past {
+            return Err(bound);
+        }
         let tokens = self.expand_tokens(expansion_tokens(text), &mut budget, 0).0;
-        (budget > 0).then(|| tokens.iter().map(|t| t.text.as_str()).collect())
+        match budget.past {
+            Some(bound) => Err(bound),
+            None => Ok(tokens.iter().map(|t| t.text.as_str()).collect()),
+        }
     }
 
-    /// [`Macros::expand_bounded`], or `text` as it is when the expansion gets past the bound.
+    /// [`Macros::expand_bounded`] within [`MAX_EXPANSION_BYTES`], or `text` as it is when the
+    /// expansion gets past a bound.
     pub fn expand(&self, text: &str) -> String {
-        self.expand_bounded(text).unwrap_or_else(|| text.to_owned())
+        self.expand_bounded(text, MAX_EXPANSION_BYTES)
+            .unwrap_or_else(|_| text.to_owned())
     }
 
     /// The expansion of `tokens`, an argument `depth` calls deep, spending `budget`; it stops
-    /// where it is when the budget runs out or the calls nest too deep, and leaves it at 0.
+    /// where it is when the budget runs out or the calls nest too deep, and leaves it stopped.
     fn expand_tokens<'a>(
         &'a self,
         mut tokens: Vec<ExpansionToken<'a>>,
-        budget: &mut usize,
+        budget: &mut Budget,
         depth: usize,
     ) -> (Vec<ExpansionToken<'a>>, bool) {
         if depth > MAX_CALL_DEPTH {
-            *budget = 0;
+            budget.stop(Bound::Tokens);
         }
         let mut i = 0;
         let mut unfinished = false;
-        while i < tokens.len() && *budget > 0 {
+        while i < tokens.len() && !budget.stopped() {
             let Some((name, m)) = self.0.get_key_value(tokens[i].text.as_str()) else {
                 i += 1;
                 continue;
@@ -313,7 +327,13 @@ impl Macros {
             }
             let mut hidden = tokens[i].hidden.clone();
             let (mut body, next) = match &m.params {
-                None => (expansion_tokens(&m.body), i + 1),
+                None => {
+                    // The replacement is a copy of the body: paid for first.
+                    if !budget.spend(0, m.body.len()) {
+                        break;
+                    }
+                    (expansion_tokens(&m.body), i + 1)
+                }
                 Some(params) => {
                     let Some((args, next)) = arguments(&tokens, i + 1) else {
                         unfinished |= tokens[i + 1..]
@@ -323,15 +343,16 @@ impl Macros {
                         i += 1;
                         continue;
                     };
-                    // The arguments are copies, expanded by recursion: paid for first.
-                    if !spend(budget, args.iter().map(Vec::len).sum()) {
+                    // The arguments are copied where they are used, expanded by recursion:
+                    // paid for first.
+                    if !budget.spend(args.iter().map(|a| a.len()).sum(), 0) {
                         break;
                     }
                     // A call can cross a replacement boundary. Only disabling shared by
                     // its name and closing parenthesis carries into the new replacement.
                     hidden.retain(|h| tokens[next - 1].hidden.contains(h));
                     let Some(body) = self.substitute(params, &args, &m.body, budget, depth) else {
-                        *budget = 0;
+                        budget.stop(Bound::Tokens);
                         break;
                     };
                     (body, next)
@@ -339,7 +360,7 @@ impl Macros {
             };
             hidden.push(name);
             // The replacement and the names each of its tokens will hide.
-            if !spend(budget, 1 + body.len() * (1 + hidden.len())) {
+            if !budget.spend(1 + body.len() * (1 + hidden.len()), 0) {
                 break;
             }
             for token in &mut body {
@@ -361,9 +382,9 @@ impl Macros {
     fn substitute<'a>(
         &'a self,
         params: &[String],
-        args: &[Vec<ExpansionToken<'a>>],
+        args: &[&[ExpansionToken<'a>]],
         body: &str,
-        budget: &mut usize,
+        budget: &mut Budget,
         depth: usize,
     ) -> Option<Vec<ExpansionToken<'a>>> {
         let tokens = lex(body);
@@ -378,9 +399,15 @@ impl Macros {
         for (at, token) in tokens.iter().enumerate() {
             match params.iter().position(|p| p == token) {
                 Some(k) => {
-                    let arg = args.get(k).map_or(&[][..], |a| a.as_slice());
+                    let arg = args.get(k).copied().unwrap_or_default();
                     let from = arg.iter().position(|t| !t.blank()).unwrap_or(arg.len());
                     let end = arg.iter().rposition(|t| !t.blank()).map_or(from, |n| n + 1);
+                    // An argument used many times multiplies: each copy is paid for before it
+                    // is made, and its expansion as it grows.
+                    let bytes = arg[from..end].iter().map(|t| t.text.len()).sum();
+                    if !budget.spend(0, bytes) {
+                        return None;
+                    }
                     let arg = arg[from..end].to_vec();
                     if pasted(at, -1) || pasted(at, 1) {
                         if arg.is_empty() {
@@ -392,12 +419,12 @@ impl Macros {
                     } else {
                         out.extend(self.expand_tokens(arg, budget, depth + 1).0);
                     }
-                    // An argument used many times multiplies: bounded before it is held.
-                    if out.len() >= *budget {
+                    if out.len() >= budget.tokens {
                         return None;
                     }
                 }
-                None => out.push(ExpansionToken::new(token)),
+                None if budget.spend(0, token.len()) => out.push(ExpansionToken::new(token)),
+                None => return None,
             }
         }
         // `a ## b` → `ab`.
@@ -417,6 +444,10 @@ impl Macros {
                     if left.text.is_empty() {
                         left = token;
                     } else if !token.text.is_empty() {
+                        // The right token is copied onto the left one: paid for first.
+                        if !budget.spend(0, token.text.len()) {
+                            return None;
+                        }
                         left.text.push_str(&token.text);
                         left.hidden.retain(|h| token.hidden.contains(h));
                     }
@@ -433,39 +464,86 @@ impl Macros {
         // A paste that makes no single token (`b ## (`, Alpha Piscium's
         // `colors2_colorspaces_ ## a ## _to_ ## b ##(x)`) stays the tokens it is made of, as
         // GL drivers' preprocessors leave it: the name before the `(` is then rescanned and can
-        // call a macro.
-        let joined = joined
-            .into_iter()
-            .flat_map(|token| {
-                let parts = lex(&token.text);
-                if parts.len() < 2 {
-                    return vec![token];
-                }
-                parts
-                    .into_iter()
-                    .map(|text| ExpansionToken {
-                        text: text.into(),
-                        hidden: token.hidden.clone(),
-                    })
-                    .collect()
-            })
-            .collect();
-        Some(joined)
+        // call a macro. The parts are copies, paid for first.
+        let mut split = Vec::with_capacity(joined.len());
+        for token in joined {
+            let parts = lex(&token.text);
+            if parts.len() < 2 {
+                split.push(token);
+                continue;
+            }
+            if !budget.spend(0, token.text.len()) {
+                return None;
+            }
+            split.extend(parts.into_iter().map(|text| ExpansionToken {
+                text: text.into(),
+                hidden: token.hidden.clone(),
+            }));
+        }
+        Some(split)
     }
 }
 
-/// Takes `cost` from `budget`, or empties it when `cost` does not fit: an empty budget is an
-/// expansion that stopped.
-fn spend(budget: &mut usize, cost: usize) -> bool {
-    match budget.checked_sub(cost) {
-        Some(left) if left > 0 => {
-            *budget = left;
-            true
+/// The bound an expansion gets past.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Bound {
+    /// It makes more than [`MAX_EXPANSION`] tokens, or nests calls in arguments too deep.
+    Tokens,
+    /// Its text grows past the bytes its caller allows.
+    Bytes,
+}
+
+/// What an expansion may still make: [`MAX_EXPANSION`] tokens, and the bytes its caller allows,
+/// from which every copy of text (the text's own, a replacement, an argument, a paste) is paid
+/// before it is made.
+struct Budget {
+    tokens: usize,
+    bytes: usize,
+    /// The bound it got past, once it has: the expansion stops.
+    past: Option<Bound>,
+}
+
+impl Budget {
+    /// `max_bytes` with `text` paid for: it is copied into tokens first.
+    fn new(text: &str, max_bytes: usize) -> Self {
+        let mut budget = Self {
+            tokens: MAX_EXPANSION,
+            bytes: max_bytes,
+            past: None,
+        };
+        budget.spend(0, text.len());
+        budget
+    }
+
+    /// Takes `tokens` and `bytes`, or stops the expansion when either does not fit.
+    fn spend(&mut self, tokens: usize, bytes: usize) -> bool {
+        match (
+            self.tokens.checked_sub(tokens),
+            self.bytes.checked_sub(bytes),
+        ) {
+            (Some(tokens), Some(bytes)) if tokens > 0 => {
+                (self.tokens, self.bytes) = (tokens, bytes);
+                true
+            }
+            (Some(tokens), None) if tokens > 0 => {
+                self.stop(Bound::Bytes);
+                false
+            }
+            _ => {
+                self.stop(Bound::Tokens);
+                false
+            }
         }
-        _ => {
-            *budget = 0;
-            false
-        }
+    }
+
+    /// Stops the expansion, which keeps the first bound it got past.
+    fn stop(&mut self, bound: Bound) {
+        (self.tokens, self.bytes) = (0, 0);
+        self.past.get_or_insert(bound);
+    }
+
+    fn stopped(&self) -> bool {
+        self.past.is_some()
     }
 }
 
@@ -495,11 +573,12 @@ fn expansion_tokens(text: &str) -> Vec<ExpansionToken<'_>> {
 }
 
 /// The arguments of a call whose `(` is the next non-blank token from `i`, split at top-level
-/// commas, and the index after its `)`. `None` when no `(` follows or it never closes.
-fn arguments<'a>(
-    tokens: &[ExpansionToken<'a>],
+/// commas, and the index after its `)`. `None` when no `(` follows or it never closes. They are
+/// borrowed: each use copies one.
+fn arguments<'t, 'a>(
+    tokens: &'t [ExpansionToken<'a>],
     mut i: usize,
-) -> Option<(Vec<Vec<ExpansionToken<'a>>>, usize)> {
+) -> Option<(Vec<&'t [ExpansionToken<'a>]>, usize)> {
     while tokens.get(i)?.blank() {
         i += 1;
     }
@@ -511,12 +590,12 @@ fn arguments<'a>(
         match t.text.as_str() {
             "(" => depth += 1,
             ")" if depth == 0 => {
-                args.push(tokens[from..j].to_vec());
+                args.push(&tokens[from..j]);
                 return Some((args, j + 1));
             }
             ")" => depth -= 1,
             "," if depth == 0 => {
-                args.push(tokens[from..j].to_vec());
+                args.push(&tokens[from..j]);
                 from = j + 1;
             }
             _ => {}
