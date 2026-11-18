@@ -24,6 +24,7 @@ use std::fmt::Write;
 use naga::ShaderStage;
 use naga::front::glsl::{Frontend, Options};
 use naga::valid::{Capabilities, ValidationFlags, Validator};
+use sunrise_shader_api::guard;
 
 use crate::Preprocessed;
 
@@ -1289,8 +1290,23 @@ pub(super) fn split_sampler(ty: &str) -> (String, &'static str) {
     (base, if shadow { "samplerShadow" } else { "sampler" })
 }
 
-/// Parses and validates one stage; errors at the pack's files and lines.
+/// Parses and validates one stage; errors at the pack's files and lines. On a thread with a large
+/// stack ([`guard::guarded`]), as naga recurses over the shape of the source.
 fn compile(stage: &Stage, text: &str, header_lines: usize) -> Result<naga::Module, Vec<Error>> {
+    guard::guarded(|| compile_here(stage, text, header_lines)).unwrap_or_else(|message| {
+        Err(vec![Error {
+            file: stage.pp.files.first().cloned().unwrap_or_default(),
+            line: 1,
+            message,
+        }])
+    })
+}
+
+fn compile_here(
+    stage: &Stage,
+    text: &str,
+    header_lines: usize,
+) -> Result<naga::Module, Vec<Error>> {
     let specialized = image_parameters::rewrite(text).map_err(|message| {
         vec![Error {
             file: stage.pp.files.first().cloned().unwrap_or_default(),
@@ -1324,6 +1340,11 @@ fn compile(stage: &Stage, text: &str, header_lines: usize) -> Result<naga::Modul
             },
         }
     };
+    // naga's GLSL front end has no bound of its own on how deep it recurses.
+    if let Some((offset, message)) = guard::glsl_refusal(text) {
+        let offset = offset.unwrap_or(0) as u32;
+        return Err(vec![at(text, naga::Span::new(offset, offset), message)]);
+    }
     let parse = |text: &str| {
         Frontend::default()
             .parse(&Options::from(stage.kind), text)
@@ -1682,6 +1703,29 @@ mod tests {
         let p = item_program("gbuffers_hand", longer, "currentRenderedItemId2", &hand)
             .unwrap_or_else(|e| panic!("{e:?}"));
         assert!(!p.interface.draw);
+    }
+
+    /// A program too deep for naga's GLSL front end is refused before naga parses it: naga
+    /// recurses once per term of an operator chain, with no limit, and a stack overflow ends the
+    /// process. On a 2 MiB thread, so one let through fails at once.
+    #[test]
+    fn a_program_too_deep_for_naga_is_refused() {
+        let errors = std::thread::Builder::new()
+            .stack_size(2 << 20)
+            .spawn(|| {
+                let chain = format!("a{}", "+a".repeat(10_000));
+                item_program("gbuffers_hand", "uniform float a;", &chain, &item_game()).err()
+            })
+            .unwrap()
+            .join()
+            .unwrap()
+            .unwrap();
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message.contains("chains more than")),
+            "{errors:?}"
+        );
     }
 
     #[test]

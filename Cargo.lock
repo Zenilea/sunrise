@@ -5460,6 +5460,7 @@ dependencies = [
  "naga",
  "png",
  "sunrise-core",
+ "sunrise-shader-api",
  "zip",
 ]
 

@@ -19,6 +19,7 @@ use std::fmt::Write;
 use naga::ShaderStage;
 use naga::front::glsl::{Frontend, Options};
 use naga::valid::{Capabilities, ValidationFlags, Validator};
+use sunrise_shader_api::guard;
 
 mod glsl_fixups;
 
@@ -598,7 +599,10 @@ fn compile(
         let (name, value) = define.split_once(' ').unwrap_or((define, ""));
         options.defines.insert(name.to_owned(), value.to_owned());
     }
-    let module = Frontend::default().parse(&options, code).map_err(|e| {
+    if let Some((_, reason)) = guard::glsl_refusal(code) {
+        return Err(reason);
+    }
+    let module = guard::guarded(|| Frontend::default().parse(&options, code))?.map_err(|e| {
         e.errors
             .iter()
             .map(|e| {
@@ -610,18 +614,19 @@ fn compile(
             .collect::<Vec<_>>()
             .join("; ")
     })?;
-    let info = Validator::new(ValidationFlags::all(), Capabilities::all())
-        .validate(&module)
-        .map_err(|e| {
-            let inner = e.into_inner();
-            let mut message = inner.to_string();
-            let mut source = std::error::Error::source(&inner);
-            while let Some(s) = source {
-                write!(message, ": {s}").unwrap();
-                source = s.source();
-            }
-            message
-        })?;
+    let info = guard::guarded(|| {
+        Validator::new(ValidationFlags::all(), Capabilities::all()).validate(&module)
+    })?
+    .map_err(|e| {
+        let inner = e.into_inner();
+        let mut message = inner.to_string();
+        let mut source = std::error::Error::source(&inner);
+        while let Some(s) = source {
+            write!(message, ": {s}").unwrap();
+            source = s.source();
+        }
+        message
+    })?;
     let entry = info.get_entry_point(0);
     for (handle, global) in module.global_variables.iter() {
         let Some(binding) = global.binding.as_ref().map(|b| b.binding) else {
@@ -726,6 +731,52 @@ mod tests {
             translate_core(VANILLA_VSH, VANILLA_FSH, &["IS_GUI"], &include, &GLUE).unwrap();
         assert_eq!(program.vertex.entry_points.len(), 1);
         assert_eq!(program.fragment.entry_points.len(), 1);
+    }
+
+    /// naga's GLSL front end recurses once per term of an operator chain and once per level of
+    /// nesting, with no limit of its own, and a stack overflow ends the process: a pack's shader
+    /// that deep is refused before naga parses it. Each runs on a 2 MiB thread, so one the guard
+    /// let through fails at once.
+    #[test]
+    fn shaders_too_deep_for_naga_are_refused() {
+        let translate = |statement: String| {
+            let fsh = format!(
+                "#version 330\nlayout(location = 0) out vec4 fragColor;\nvoid main() {{\n    \
+                 float a = 0.5;\n    bool b = a > 0.0;\n    float x = 0.0;\n    {statement}\n    fragColor = vec4(x);\n}}\n"
+            );
+            std::thread::Builder::new()
+                .stack_size(2 << 20)
+                .spawn(move || {
+                    translate_core(VANILLA_VSH, &fsh, &["IS_GUI"], &include, &GLUE).map(drop)
+                })
+                .unwrap()
+                .join()
+                .unwrap()
+        };
+        let deep = [
+            (format!("x = a{};", "+a".repeat(10_000)), "chains more than"),
+            (
+                format!("x = {}a{};", "(".repeat(10_000), ")".repeat(10_000)),
+                "nest more than",
+            ),
+            (format!("x = {}a;", "- ".repeat(10_000)), "nest more than"),
+            (
+                format!("{}x = 1.0;", "if (b) ".repeat(10_000)),
+                "nest more than",
+            ),
+        ];
+        for (statement, reason) in deep {
+            let error = translate(statement).unwrap_err();
+            assert!(error.contains(reason), "{error}");
+        }
+        // What the bounds let through still translates.
+        for statement in [
+            format!("x = a{};", "+a".repeat(150)),
+            format!("x = {}a{};", "(".repeat(190), ")".repeat(190)),
+            format!("{}x = 1.0;", "if (b) ".repeat(190)),
+        ] {
+            translate(statement).unwrap();
+        }
     }
 
     /// A 26.3 pack's `gl_VertexIndex` means vanilla's vertex number, four per quad. The text

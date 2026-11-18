@@ -17,6 +17,7 @@ use naga::ShaderStage;
 use naga::front::glsl::{Frontend, Options};
 use naga::valid::{Capabilities, ValidationFlags, Validator};
 use sunrise_assets::resource_source::ResourceSource;
+use sunrise_shader_api::guard;
 
 /// One program, ready for wgpu.
 pub struct Program {
@@ -206,8 +207,10 @@ fn wrap_main(src: &str) -> Result<String, String> {
 }
 
 fn parse(stage: ShaderStage, text: &str) -> Result<naga::Module, String> {
-    let module = Frontend::default()
-        .parse(&Options::from(stage), text)
+    if let Some((_, reason)) = guard::glsl_refusal(text) {
+        return Err(reason);
+    }
+    let module = guard::guarded(|| Frontend::default().parse(&Options::from(stage), text))?
         .map_err(|e| {
             e.errors
                 .iter()
@@ -215,9 +218,10 @@ fn parse(stage: ShaderStage, text: &str) -> Result<naga::Module, String> {
                 .collect::<Vec<_>>()
                 .join("; ")
         })?;
-    Validator::new(ValidationFlags::all(), Capabilities::empty())
-        .validate(&module)
-        .map_err(|e| format!("{:?}", e.into_inner()))?;
+    guard::guarded(|| {
+        Validator::new(ValidationFlags::all(), Capabilities::empty()).validate(&module)
+    })?
+    .map_err(|e| format!("{:?}", e.into_inner()))?;
     Ok(module)
 }
 
@@ -280,6 +284,32 @@ mod tests {
         ]));
         translate(&source, "custom:post/test", "custom:post/test").unwrap();
         assert!(translate(&source, "custom:missing", "custom:post/test").is_err());
+    }
+
+    /// A post shader too deep for naga's GLSL front end is refused before naga parses it, as a
+    /// core shader is (`core_shader`'s test): on a 2 MiB thread, so one let through fails at once.
+    #[test]
+    fn a_shader_too_deep_for_naga_is_refused() {
+        use sunrise_assets::resource_source::Resource;
+        let error = std::thread::Builder::new()
+            .stack_size(2 << 20)
+            .spawn(|| {
+                let fsh = format!(
+                    "#version 330\nlayout(location=0) out vec4 fragColor;\n\
+                     void main() {{ float a = 0.5; fragColor = vec4(a{}); }}",
+                    "+a".repeat(10_000)
+                );
+                let source = ResourceSource::indexed(std::collections::BTreeMap::from([
+                    ("assets/custom/shaders/post/test.vsh".into(), Resource::bytes(b"#version 330\nvoid main() { gl_Position = vec4(0.0, 0.0, 0.0, 1.0); }".to_vec())),
+                    ("assets/custom/shaders/post/test.fsh".into(), Resource::bytes(fsh.into_bytes())),
+                ]));
+                translate(&source, "custom:post/test", "custom:post/test").err()
+            })
+            .unwrap()
+            .join()
+            .unwrap()
+            .unwrap();
+        assert!(error.contains("chains more than"), "{error}");
     }
 
     #[test]
