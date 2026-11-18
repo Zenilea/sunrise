@@ -470,12 +470,21 @@ impl Guard {
     }
 }
 
-/// Moves a mutes file that cannot be read to `<name>.bad`, so the next save does not write over
-/// the mutes in it, and says what happened.
+/// Moves a mutes file that cannot be read to `<name>.bad` (or `.bad.1`, `.bad.2`… when that is
+/// taken), so neither the next save nor a later bad file writes over the mutes in it, and says
+/// what happened.
 fn set_aside(file: &Path, reason: &str) -> String {
-    let mut aside = file.as_os_str().to_owned();
-    aside.push(".bad");
-    let aside = PathBuf::from(aside);
+    let aside = (0..)
+        .map(|n| {
+            let mut aside = file.as_os_str().to_owned();
+            aside.push(".bad");
+            if n > 0 {
+                aside.push(format!(".{n}"));
+            }
+            PathBuf::from(aside)
+        })
+        .find(|aside| !aside.exists())
+        .expect("a free name");
     let kept = match std::fs::rename(file, &aside) {
         Ok(()) => format!("kept as {}", aside.display()),
         Err(e) => format!("could not be moved aside ({e})"),

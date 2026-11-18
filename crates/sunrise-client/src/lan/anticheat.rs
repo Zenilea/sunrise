@@ -106,7 +106,8 @@ impl Anticheat {
 
 /// The kicks saved in `path`, and why a file that exists could not be read. A missing file is a
 /// first run. One that cannot be read or parsed (half written by a crash, say) is moved to
-/// `<name>.bad`, so the next save does not write over the kicks in it.
+/// `<name>.bad` (or `.bad.1`, `.bad.2`… when that is taken), so neither the next save nor a later
+/// bad file writes over the kicks in it.
 fn load_strikes(path: &std::path::Path) -> (Strikes, Option<String>) {
     let read = match std::fs::read(path) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (Strikes::default(), None),
@@ -117,9 +118,17 @@ fn load_strikes(path: &std::path::Path) -> (Strikes, Option<String>) {
             Ok(strikes) => return (strikes, None),
             Err(reason) => reason,
         };
-    let mut aside = path.as_os_str().to_owned();
-    aside.push(".bad");
-    let aside = std::path::PathBuf::from(aside);
+    let aside = (0..)
+        .map(|n| {
+            let mut aside = path.as_os_str().to_owned();
+            aside.push(".bad");
+            if n > 0 {
+                aside.push(format!(".{n}"));
+            }
+            std::path::PathBuf::from(aside)
+        })
+        .find(|aside| !aside.exists())
+        .expect("a free name");
     let kept = match std::fs::rename(path, &aside) {
         Ok(()) => format!("kept as {}", aside.display()),
         Err(e) => format!("could not be moved aside ({e})"),
@@ -746,6 +755,24 @@ mod tests {
             ..Config::default()
         });
         assert_eq!(fresh.strike(7, Check::Combat).0, 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_second_bad_strikes_file_does_not_replace_the_first_one_kept_aside() {
+        let dir =
+            std::env::temp_dir().join(format!("sunrise-anticheat-bad2-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let strikes = dir.join("anticheat-strikes.json");
+        std::fs::write(&strikes, "first {").unwrap();
+        assert!(load_strikes(&strikes).1.is_some());
+        std::fs::write(&strikes, "second {").unwrap();
+        let problem = load_strikes(&strikes).1.unwrap();
+        assert!(problem.contains(".bad.1"), "{problem}");
+        let kept = |name: &str| std::fs::read_to_string(dir.join(name));
+        assert_eq!(kept("anticheat-strikes.json.bad").unwrap(), "first {");
+        assert_eq!(kept("anticheat-strikes.json.bad.1").unwrap(), "second {");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -383,3 +383,20 @@ fn a_mutes_file_that_cannot_be_read_is_kept_aside_and_reported() {
     assert_eq!(Guard::load(Config::default(), &dir).1, None);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_second_bad_mutes_file_does_not_replace_the_first_one_kept_aside() {
+    let dir = std::env::temp_dir().join(format!("chat-filter-bad2-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join(MUTES_FILE);
+    std::fs::write(&file, "first {").unwrap();
+    assert!(Guard::load(Config::default(), &dir).1.is_some());
+    std::fs::write(&file, "second {").unwrap();
+    let problem = Guard::load(Config::default(), &dir).1.unwrap();
+    assert!(problem.contains(".bad.1"), "{problem}");
+    let kept = |name: &str| std::fs::read_to_string(dir.join(format!("{MUTES_FILE}{name}")));
+    assert_eq!(kept(".bad").unwrap(), "first {");
+    assert_eq!(kept(".bad.1").unwrap(), "second {");
+    let _ = std::fs::remove_dir_all(&dir);
+}
