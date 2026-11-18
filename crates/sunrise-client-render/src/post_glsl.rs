@@ -219,9 +219,10 @@ fn parse(stage: ShaderStage, text: &str) -> Result<naga::Module, String> {
                 .join("; ")
         })?;
     guard::guarded(|| {
-        Validator::new(ValidationFlags::all(), Capabilities::empty()).validate(&module)
-    })?
-    .map_err(|e| format!("{:?}", e.into_inner()))?;
+        Validator::new(ValidationFlags::all(), Capabilities::empty())
+            .validate(&module)
+            .map_err(|e| format!("{:?}", e.into_inner()))
+    })??;
     Ok(module)
 }
 

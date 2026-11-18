@@ -614,19 +614,21 @@ fn compile(
             .collect::<Vec<_>>()
             .join("; ")
     })?;
+    // The error becomes text inside the guarded closure: naga's own is large to return.
     let info = guard::guarded(|| {
-        Validator::new(ValidationFlags::all(), Capabilities::all()).validate(&module)
-    })?
-    .map_err(|e| {
-        let inner = e.into_inner();
-        let mut message = inner.to_string();
-        let mut source = std::error::Error::source(&inner);
-        while let Some(s) = source {
-            write!(message, ": {s}").unwrap();
-            source = s.source();
-        }
-        message
-    })?;
+        Validator::new(ValidationFlags::all(), Capabilities::all())
+            .validate(&module)
+            .map_err(|e| {
+                let inner = e.into_inner();
+                let mut message = inner.to_string();
+                let mut source = std::error::Error::source(&inner);
+                while let Some(s) = source {
+                    write!(message, ": {s}").unwrap();
+                    source = s.source();
+                }
+                message
+            })
+    })??;
     let entry = info.get_entry_point(0);
     for (handle, global) in module.global_variables.iter() {
         let Some(binding) = global.binding.as_ref().map(|b| b.binding) else {
