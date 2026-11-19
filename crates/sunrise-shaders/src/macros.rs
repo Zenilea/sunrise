@@ -266,7 +266,12 @@ impl Macros {
     /// looked at is held to `max_bytes`, as [`Macros::expand_bounded`]'s.
     pub(crate) fn unfinished_call(&self, text: &str, upcoming: &[&str], max_bytes: usize) -> bool {
         let mut budget = Budget::new(text, max_bytes);
-        let (tokens, unfinished) = self.expand_tokens(expansion_tokens(text), &mut budget, 0);
+        // A line the budget refuses is not lexed: `expand_bounded` reports it.
+        if budget.stopped() {
+            return false;
+        }
+        let tokens = expansion_tokens(text, &mut budget);
+        let (tokens, unfinished) = self.expand_tokens(tokens, &mut budget, 0);
         unfinished
             || (tokens.iter().rfind(|t| !t.blank()).is_some_and(|t| {
                 self.0.get_key_value(&t.text).is_some_and(|(name, m)| {
@@ -289,10 +294,22 @@ impl Macros {
         if let Some(bound) = budget.past {
             return Err(bound);
         }
-        let tokens = self.expand_tokens(expansion_tokens(text), &mut budget, 0).0;
+        let tokens = expansion_tokens(text, &mut budget);
+        let tokens = self.expand_tokens(tokens, &mut budget, 0).0;
+        let mut out = String::new();
+        let mut prev = "";
+        for t in &tokens {
+            // Tokens the expansion made adjacent are kept apart where they would read as one
+            // (`-` `-`); source tokens and explicit pastes stay as written. The space is paid for.
+            if t.apart && merges(prev, &t.text) && budget.spend(0, 1) {
+                out.push(' ');
+            }
+            out.push_str(&t.text);
+            prev = &t.text;
+        }
         match budget.past {
             Some(bound) => Err(bound),
-            None => Ok(tokens.iter().map(|t| t.text.as_str()).collect()),
+            None => Ok(out),
         }
     }
 
@@ -332,7 +349,7 @@ impl Macros {
                     if !budget.spend(0, m.body.len()) {
                         break;
                     }
-                    (expansion_tokens(&m.body), i + 1)
+                    (expansion_tokens(&m.body, budget), i + 1)
                 }
                 Some(params) => {
                     let Some((args, next)) = arguments(&tokens, i + 1) else {
@@ -372,7 +389,14 @@ impl Macros {
             }
             // Rescan the replacement together with the remaining source. Its final name
             // may consume a call there; source tokens keep their own disabling context.
+            let end = i + body.len();
             tokens.splice(i..next, body);
+            // The replacement's ends now touch tokens they were not written beside.
+            for k in [i, end] {
+                if let Some(t) = tokens.get_mut(k) {
+                    t.apart = true;
+                }
+            }
         }
         (tokens, unfinished)
     }
@@ -387,7 +411,7 @@ impl Macros {
         budget: &mut Budget,
         depth: usize,
     ) -> Option<Vec<ExpansionToken<'a>>> {
-        let tokens = lex(body);
+        let tokens = lex_within(body, budget.tokens)?;
         let pasted = |at: usize, step: isize| {
             let mut j = at as isize + step;
             while (0..tokens.len() as isize).contains(&j) && tokens[j as usize].trim().is_empty() {
@@ -396,6 +420,8 @@ impl Macros {
             (0..tokens.len() as isize).contains(&j) && tokens[j as usize] == "##"
         };
         let mut out = Vec::new();
+        // The token after an argument touches it without being written beside it.
+        let mut after_arg = false;
         for (at, token) in tokens.iter().enumerate() {
             match params.iter().position(|p| p == token) {
                 Some(k) => {
@@ -409,6 +435,8 @@ impl Macros {
                         return None;
                     }
                     let arg = arg[from..end].to_vec();
+                    let first = out.len();
+                    after_arg = true;
                     if pasted(at, -1) || pasted(at, 1) {
                         if arg.is_empty() {
                             // An empty paste operand must not capture the preceding token.
@@ -419,11 +447,18 @@ impl Macros {
                     } else {
                         out.extend(self.expand_tokens(arg, budget, depth + 1).0);
                     }
+                    if let Some(t) = out.get_mut(first) {
+                        t.apart = true;
+                    }
                     if out.len() >= budget.tokens {
                         return None;
                     }
                 }
-                None if budget.spend(0, token.len()) => out.push(ExpansionToken::new(token)),
+                None if budget.spend(0, token.len()) => {
+                    let mut token = ExpansionToken::new(token);
+                    token.apart = std::mem::take(&mut after_arg);
+                    out.push(token);
+                }
                 None => return None,
             }
         }
@@ -475,10 +510,17 @@ impl Macros {
             if !budget.spend(0, token.text.len()) {
                 return None;
             }
-            split.extend(parts.into_iter().map(|text| ExpansionToken {
-                text: text.into(),
-                hidden: token.hidden.clone(),
-            }));
+            // Only the first part keeps its place; the rest stay joined as pasted.
+            split.extend(
+                parts
+                    .into_iter()
+                    .enumerate()
+                    .map(|(k, text)| ExpansionToken {
+                        text: text.into(),
+                        hidden: token.hidden.clone(),
+                        apart: token.apart && k == 0,
+                    }),
+            );
         }
         Some(split)
     }
@@ -553,6 +595,8 @@ impl Budget {
 struct ExpansionToken<'a> {
     text: String,
     hidden: Vec<&'a str>,
+    /// Made adjacent to the token before it by the expansion, not written beside it.
+    apart: bool,
 }
 
 impl ExpansionToken<'_> {
@@ -560,6 +604,7 @@ impl ExpansionToken<'_> {
         Self {
             text: text.into(),
             hidden: Vec::new(),
+            apart: false,
         }
     }
 
@@ -568,8 +613,29 @@ impl ExpansionToken<'_> {
     }
 }
 
-fn expansion_tokens(text: &str) -> Vec<ExpansionToken<'_>> {
-    lex(text).into_iter().map(ExpansionToken::new).collect()
+/// `text` as tokens, or none (the budget stopped) when it has more than `budget` has left: the
+/// lexer stops there, before it makes a token past it.
+fn expansion_tokens<'a>(text: &'a str, budget: &mut Budget) -> Vec<ExpansionToken<'a>> {
+    let Some(tokens) = lex_within(text, budget.tokens) else {
+        budget.stop(Bound::Tokens);
+        return Vec::new();
+    };
+    tokens.into_iter().map(ExpansionToken::new).collect()
+}
+
+/// Operators of more than one character, which two tokens written together would make.
+const OPERATORS: [&str; 23] = [
+    "++", "--", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<", ">>", "<=", ">=", "==", "!=",
+    "&&", "||", "^^", "->", "//", "/*", "*/",
+];
+
+/// Whether `a` then `b`, written together, would not read as the two tokens they are.
+fn merges(a: &str, b: &str) -> bool {
+    if a.trim().is_empty() || b.trim().is_empty() {
+        return false;
+    }
+    let joined = [a, b].concat();
+    lex(&joined) != [a, b] || OPERATORS.contains(&joined.as_str())
 }
 
 /// The arguments of a call whose `(` is the next non-blank token from `i`, split at top-level
@@ -607,6 +673,11 @@ fn arguments<'t, 'a>(
 /// Preprocessing tokens: identifiers, numbers (with their suffixes and exponents), runs of
 /// white space, `##`, and single characters. Concatenated they give back `text`.
 pub(crate) fn lex(text: &str) -> Vec<&str> {
+    lex_within(text, usize::MAX).unwrap_or_default()
+}
+
+/// [`lex`], or `None` when `text` has more than `max` tokens: found before one past `max` is kept.
+fn lex_within(text: &str, max: usize) -> Option<Vec<&str>> {
     let bytes = text.as_bytes();
     let mut out = Vec::new();
     let mut i = 0;
@@ -638,9 +709,12 @@ pub(crate) fn lex(text: &str) -> Vec<&str> {
                 i += 1;
             }
         }
+        if out.len() == max {
+            return None;
+        }
         out.push(&text[start..i]);
     }
-    out
+    Some(out)
 }
 
 pub(crate) fn is_ident_start(c: char) -> bool {
@@ -791,5 +865,40 @@ mod tests {
         assert_eq!(m.expand("CAT(N, 2) CAT(col, ortex4)"), "N2 colortex4");
         assert_eq!(m.expand("PI() SQ SQ(1"), "3.14 SQ SQ(1");
         assert_eq!(m.get("SQ"), None);
+    }
+
+    /// A line the budget refuses (its bytes, or more tokens than it has left) is not lexed by the
+    /// lookahead, whatever follows it, and the lexer stops at the budget.
+    #[test]
+    fn a_call_lookahead_past_the_budget_stops_before_it_lexes() {
+        let mut m = Macros::default();
+        m.define_function("F", vec!["x".into()], "x");
+        let (open, long) = (["(1)"], "+ ".repeat(MAX_EXPANSION) + "F");
+        assert!(m.unfinished_call("F", &open, 1 << 20));
+        // Past its bytes: refused before it is lexed.
+        assert!(!m.unfinished_call("F", &open, 0));
+        // Past its tokens, within its bytes: the lexer stops at the budget.
+        assert!(!m.unfinished_call(&long, &open, 1 << 30));
+        assert_eq!(m.expand_bounded(&long, 1 << 30), Err(Bound::Tokens));
+        assert_eq!(lex_within("a b c", 5).map(|t| t.len()), Some(5));
+        assert!(lex_within("a b c", 4).is_none());
+    }
+
+    /// Tokens the expansion made adjacent are kept apart where they would read as one; source
+    /// tokens and explicit pastes are not.
+    #[test]
+    fn expanded_tokens_are_separated_where_joining_them_changes_how_they_read() {
+        let mut m = Macros::default();
+        m.define("E", "");
+        m.define("P", "+");
+        m.define("N", "1");
+        m.define_function("NEG", vec!["x".into()], "-x");
+        m.define_function("CAT", vec!["a".into(), "b".into()], "a ## b");
+        assert_eq!(m.expand("a+P"), "a+ +");
+        assert_eq!(m.expand("NEG(-N)"), "- -1");
+        assert_eq!(m.expand("-E-"), "- -");
+        assert_eq!(m.expand("NEG(N)N"), "-1 1");
+        assert_eq!(m.expand("i++ - -j"), "i++ - -j");
+        assert_eq!(m.expand("CAT(+, +) CAT(-, >) CAT(a, b)"), "++ -> ab");
     }
 }

@@ -89,6 +89,17 @@ fn macros_past_the_byte_budget_stop_before_their_text_is_made() {
     assert_eq!(fits.as_deref(), Ok("wwwwwwww"));
 }
 
+/// A line of more tokens than an expansion may make, within its bytes, is refused for its tokens
+/// as the lexer reads it: no token is made for each of its million source tokens (48 MB of them).
+#[test]
+fn a_line_past_the_token_budget_is_not_lexed_to_its_end() {
+    let text = "+".repeat(1 << 20);
+    let (expanded, largest) =
+        largest_allocation(|| Macros::default().expand_bounded(&text, 2 << 20));
+    assert_eq!(expanded.map(|e| e.len()), Err(Bound::Tokens));
+    assert!(largest < 8 << 20, "largest allocation {largest} bytes");
+}
+
 /// A pack's line whose macros would make twice what a stage may hold (8 MB from a few KB) is
 /// refused at its own file and line before its text is made, and the stage reads no further.
 #[test]
