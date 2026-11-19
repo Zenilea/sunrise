@@ -1300,13 +1300,17 @@ pub(super) fn split_sampler(ty: &str) -> (String, &'static str) {
 /// Parses and validates one stage; errors at the pack's files and lines. On a thread with a large
 /// stack ([`guard::guarded`]), as naga recurses over the shape of the source.
 fn compile(stage: &Stage, text: &str, header_lines: usize) -> Result<naga::Module, Vec<Error>> {
-    guard::guarded(|| compile_here(stage, text, header_lines)).unwrap_or_else(|message| {
-        Err(vec![Error {
-            file: stage.pp.files.first().cloned().unwrap_or_default(),
-            line: 1,
-            message,
-        }])
-    })
+    guard::guarded(|| compile_here(stage, text, header_lines))
+        .unwrap_or_else(|message| Err(vec![stage_error(stage, 1, message)]))
+}
+
+/// An error at the stage's file, no line of its own.
+fn stage_error(stage: &Stage, line: u32, message: String) -> Error {
+    Error {
+        file: stage.pp.files.first().cloned().unwrap_or_default(),
+        line,
+        message,
+    }
 }
 
 fn compile_here(
@@ -1349,23 +1353,14 @@ fn compile_here(
                 at(text, offset, refusal.message)
             }
             // The whole stage: its file.
-            None => Error {
-                file: stage.pp.files.first().cloned().unwrap_or_default(),
-                line: 0,
-                message: refusal.message,
-            },
+            None => stage_error(stage, 0, refusal.message),
         }])
     };
     if let Some(errors) = refused(text) {
         return Err(errors);
     }
-    let specialized = image_parameters::rewrite(text).map_err(|message| {
-        vec![Error {
-            file: stage.pp.files.first().cloned().unwrap_or_default(),
-            line: 1,
-            message,
-        }]
-    })?;
+    let specialized =
+        image_parameters::rewrite(text).map_err(|message| vec![stage_error(stage, 1, message)])?;
     let bounded = integer_bounds::rewrite(&array_constructors::rewrite(&specialized));
     let text = bounded.as_str();
     let parse = |text: &str| {
