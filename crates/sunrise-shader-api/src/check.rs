@@ -162,16 +162,21 @@ pub fn check(pack: &Pack) -> Result<Report, Vec<Problem>> {
     let stages = m
         .sky
         .iter()
-        .map(|s| (StageKind::Sky, s))
-        .chain(m.vertex.iter().map(|s| (StageKind::Vertex, s)))
-        .chain(m.material.iter().map(|s| (StageKind::Material, s)))
-        .chain(m.weather.iter().map(|s| (StageKind::Weather, s)))
-        .chain(m.post.iter().map(|s| (StageKind::Post, s)))
-        .chain(m.tonemap.iter().map(|s| (StageKind::Tonemap, s)))
-        .chain(m.entity.iter().map(|s| (StageKind::Entity, s)));
+        .map(|s| (StageKind::Sky, s, 0usize))
+        .chain(m.vertex.iter().map(|s| (StageKind::Vertex, s, 0)))
+        .chain(m.material.iter().map(|s| (StageKind::Material, s, 0)))
+        .chain(m.weather.iter().map(|s| (StageKind::Weather, s, 0)))
+        .chain(
+            m.post
+                .iter()
+                .enumerate()
+                .map(|(i, s)| (StageKind::Post, s, i)),
+        )
+        .chain(m.tonemap.iter().map(|s| (StageKind::Tonemap, s, 0)))
+        .chain(m.entity.iter().map(|s| (StageKind::Entity, s, 0)));
     let (mut checked, mut problems) = (Vec::new(), Vec::new());
-    for (kind, stage) in stages {
-        match check_stage(pack, kind, &stage.file) {
+    for (kind, stage, index) in stages {
+        match check_stage(pack, kind, index) {
             Ok(mut c) => {
                 c.label = stage.name.clone().unwrap_or_else(|| stage.file.clone());
                 checked.push(c);
@@ -228,17 +233,37 @@ pub fn check(pack: &Pack) -> Result<Report, Vec<Problem>> {
     }
 }
 
-/// Builds and checks one stage of `pack` from its file, on a thread of its own with the stack
-/// and the bounds of [`crate::guard`]: a pack's file never crashes the checker.
-pub fn check_stage(pack: &Pack, kind: StageKind, file: &str) -> Result<CheckedStage, Vec<Problem>> {
-    crate::guard::guarded(|| build_stage(pack, kind, file))
-        .unwrap_or_else(|reason| Err(vec![problem(file, reason)]))
+/// Builds and checks one stage of `pack` — `index` its entry in the manifest — on a thread of its
+/// own with the stack and the bounds of [`crate::guard`]: a pack's file never crashes the checker.
+pub fn check_stage(
+    pack: &Pack,
+    kind: StageKind,
+    index: usize,
+) -> Result<CheckedStage, Vec<Problem>> {
+    let file = stage_file(pack, kind, index);
+    crate::guard::guarded(|| build_stage(pack, kind, index))
+        .unwrap_or_else(|reason| Err(vec![problem(&file, reason)]))
 }
 
-fn build_stage(pack: &Pack, kind: StageKind, file: &str) -> Result<CheckedStage, Vec<Problem>> {
+fn stage_file(pack: &Pack, kind: StageKind, index: usize) -> String {
+    let m = &pack.manifest;
+    let stage = match kind {
+        StageKind::Sky => m.sky.as_ref(),
+        StageKind::Material => m.material.as_ref(),
+        StageKind::Vertex => m.vertex.as_ref(),
+        StageKind::Weather => m.weather.as_ref(),
+        StageKind::Post => m.post.get(index),
+        StageKind::Tonemap => m.tonemap.as_ref(),
+        StageKind::Entity => m.entity.as_ref(),
+    };
+    stage.map(|s| s.file.clone()).unwrap_or_default()
+}
+
+fn build_stage(pack: &Pack, kind: StageKind, index: usize) -> Result<CheckedStage, Vec<Problem>> {
+    let file = stage_file(pack, kind, index);
     // First without the entry points, so a missing or mistyped stage function
     // is reported as such rather than as a call that doesn't resolve.
-    let mut own = compose(pack, kind, file);
+    let mut own = compose(pack, kind, index);
     if let Some((at, message)) = crate::guard::refusal(&own.text) {
         return Err(vec![located(&own, at, message)]);
     }
@@ -250,7 +275,7 @@ fn build_stage(pack: &Pack, kind: StageKind, file: &str) -> Result<CheckedStage,
     }
     let module = parse(&own)?;
     own.text.truncate(entries.1.start);
-    let mut problems = signature(&module, kind, file);
+    let mut problems = signature(&module, kind, &file);
     if kind == StageKind::Material && pack.manifest.displacement.is_some() {
         problems.extend(function_signature(
             &module,
@@ -258,7 +283,7 @@ fn build_stage(pack: &Pack, kind: StageKind, file: &str) -> Result<CheckedStage,
             &["DisplacementInput"],
             "f32",
             crate::stages::DISPLACEMENT_SIGNATURE,
-            file,
+            &file,
         ));
     }
     problems.extend(api_rules(&module, kind, &own));
@@ -266,11 +291,11 @@ fn build_stage(pack: &Pack, kind: StageKind, file: &str) -> Result<CheckedStage,
     if pack.manifest.api == crate::Api::V0_2 {
         problems.extend(constructions(&module, &own));
     }
-    problems.extend(options(&module, &pack.manifest.options, file));
+    problems.extend(options(&module, &pack.manifest.options, &file));
     if !problems.is_empty() {
         return Err(problems);
     }
-    let composed = compose(pack, kind, file);
+    let composed = compose(pack, kind, index);
     let module = parse(&composed)?;
     let info = validate(&composed, &module)?;
     let (expressions, texture_reads) = cost(&module);
@@ -286,12 +311,12 @@ fn build_stage(pack: &Pack, kind: StageKind, file: &str) -> Result<CheckedStage,
                     .into(),
             ));
     }
-    problems.extend(cost_problems((expressions, texture_reads), file, "stage"));
+    problems.extend(cost_problems((expressions, texture_reads), &file, "stage"));
     problems.extend(translate(
         &module,
         &info,
         Some(&pack.manifest.options),
-        file,
+        &file,
     ));
     if !problems.is_empty() {
         return Err(problems);

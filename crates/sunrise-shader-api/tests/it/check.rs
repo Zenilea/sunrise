@@ -203,18 +203,60 @@ fn a_stages_files_are_its_own() {
     );
     pack.manifest.post[0].files.push("only_post.wgsl".into());
     let file = pack.manifest.post[0].file.clone();
-    let post = sunrise_shader_api::compose(&pack, sunrise_shader_api::StageKind::Post, &file);
+    let post = sunrise_shader_api::compose(&pack, sunrise_shader_api::StageKind::Post, 0);
     let names: Vec<_> = post.parts.iter().map(|p| p.0.as_str()).collect();
     let (extra, own) = (
         names.iter().position(|n| *n == "only_post.wgsl").unwrap(),
         names.iter().position(|n| *n == file).unwrap(),
     );
     assert!(extra < own, "{names:?}");
-    let material = pack.manifest.material.clone().unwrap().file;
-    let other =
-        sunrise_shader_api::compose(&pack, sunrise_shader_api::StageKind::Material, &material);
+    let other = sunrise_shader_api::compose(&pack, sunrise_shader_api::StageKind::Material, 0);
     assert!(other.parts.iter().all(|p| p.0 != "only_post.wgsl"));
     assert!(pack.manifest.files().contains(&"only_post.wgsl"));
+    check(&pack).unwrap();
+}
+
+/// Two `[[post]]` entries on one file each take their own `files`, not the first entry's.
+#[test]
+fn reused_post_file_gets_its_own_files() {
+    let mut pack = sample();
+    let manifest = String::from_utf8(pack.files[MANIFEST].clone()).unwrap();
+    // Swap the sample's two post entries for two that reuse one file, keeping the rest of the
+    // manifest: the material's reflection texture needs `[reflection]`.
+    let start = manifest.find("[[post]]").unwrap();
+    let end = manifest.find("[[options]]").unwrap();
+    let manifest = format!(
+        "{}[[post]]\nfile = \"blur.wgsl\"\nfiles = [\"h.wgsl\"]\n\n\
+         [[post]]\nfile = \"blur.wgsl\"\nfiles = [\"v.wgsl\"]\n\n{}",
+        &manifest[..start],
+        &manifest[end..]
+    );
+    pack.files.insert(MANIFEST.into(), manifest.into_bytes());
+    let _ = pack.files.remove("post/grade.wgsl");
+    let _ = pack.files.remove("post/vignette.wgsl");
+    // The sample's options are all still declared, so some stage must override each.
+    pack.files.insert(
+        "blur.wgsl".into(),
+        b"override saturation: f32 = 1.1;\noverride tonemap: u32 = 1u;\n\
+          override vignette: bool = true;\noverride samples: i32 = 4;\n\
+          fn post(input: PostInput) -> vec4<f32> { return input.color; }\n"
+            .to_vec(),
+    );
+    pack.files.insert(
+        "h.wgsl".into(),
+        b"fn h_helper() -> f32 { return 1.0; }\n".to_vec(),
+    );
+    pack.files.insert(
+        "v.wgsl".into(),
+        b"fn v_helper() -> f32 { return 2.0; }\n".to_vec(),
+    );
+    let pack = Pack::from_files(pack.files).unwrap();
+    let post0 = sunrise_shader_api::compose(&pack, sunrise_shader_api::StageKind::Post, 0);
+    assert!(post0.text.contains("fn h_helper()"), "{}", post0.text);
+    assert!(!post0.text.contains("fn v_helper()"), "{}", post0.text);
+    let post1 = sunrise_shader_api::compose(&pack, sunrise_shader_api::StageKind::Post, 1);
+    assert!(post1.text.contains("fn v_helper()"), "{}", post1.text);
+    assert!(!post1.text.contains("fn h_helper()"), "{}", post1.text);
     check(&pack).unwrap();
 }
 

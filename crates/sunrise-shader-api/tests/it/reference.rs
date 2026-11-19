@@ -175,8 +175,9 @@ fn the_sample_pack_s_stages_compile() {
         (StageKind::Post, m.post.iter().collect()),
     ];
     for (kind, list) in stages {
-        for stage in list {
-            let composed = compose(&pack, kind, &stage.file);
+        for (i, stage) in list.iter().enumerate() {
+            let index = if kind == StageKind::Post { i } else { 0 };
+            let composed = compose(&pack, kind, index);
             validate(&composed.text);
             // Errors point into the pack's own file.
             let part = composed.parts.iter().find(|(f, _)| *f == stage.file);

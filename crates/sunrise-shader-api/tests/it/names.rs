@@ -128,8 +128,7 @@ fn parsed(wgsl: &str) -> BTreeSet<String> {
 fn a_0_2_prelude_declares_only_the_names_on_its_list() {
     let pack = pack(None);
     for &kind in Api::V0_2.stages() {
-        let file = format!("{}.wgsl", kind.name());
-        let composed = compose(&pack, kind, &file);
+        let composed = compose(&pack, kind, 0);
         let (part, range) = &composed.parts[0];
         assert_eq!(part, "<prelude>");
         let prelude = &composed.text[range.clone()];

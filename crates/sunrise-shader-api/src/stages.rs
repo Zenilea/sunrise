@@ -951,9 +951,10 @@ pub fn post_target_declarations(manifest: &crate::manifest::Manifest) -> String 
         .collect()
 }
 
-/// The WGSL of the stage `kind` whose own file is `file`: the prelude, the
-/// pack's shared files in order, the file, then the entry points, all of the pack's line.
-pub fn compose(pack: &Pack, kind: StageKind, file: &str) -> Composed {
+/// The WGSL of the stage `kind`: the prelude, the pack's shared files in order, the file,
+/// then the entry points, all of the pack's line. `index` is its entry in the manifest
+/// (`post` may hold several, even of one file; other kinds ignore it).
+pub fn compose(pack: &Pack, kind: StageKind, index: usize) -> Composed {
     let api = pack.manifest.api;
     let mut composed = Composed {
         text: String::new(),
@@ -973,21 +974,22 @@ pub fn compose(pack: &Pack, kind: StageKind, file: &str) -> Composed {
     if kind == StageKind::Post {
         prelude += &post_target_declarations(&pack.manifest);
     }
-    push("<prelude>", &prelude);
-    for shared in pack.manifest.shared.iter().filter(|s| *s != file) {
-        push(shared, pack.source(shared).unwrap_or_default());
-    }
-    // The stage's own extra files, between the shared ones and its file.
     let m = &pack.manifest;
     let stage = match kind {
         StageKind::Sky => m.sky.as_ref(),
         StageKind::Material => m.material.as_ref(),
         StageKind::Vertex => m.vertex.as_ref(),
         StageKind::Weather => m.weather.as_ref(),
-        StageKind::Post => m.post.iter().find(|s| s.file == file),
+        StageKind::Post => m.post.get(index),
         StageKind::Tonemap => m.tonemap.as_ref(),
         StageKind::Entity => m.entity.as_ref(),
     };
+    let file = stage.map(|s| s.file.as_str()).unwrap_or("");
+    push("<prelude>", &prelude);
+    for shared in m.shared.iter().filter(|s| *s != file) {
+        push(shared, pack.source(shared).unwrap_or_default());
+    }
+    // The stage's own extra files, between the shared ones and its file.
     for extra in stage.into_iter().flat_map(|s| &s.files) {
         if extra != file && !m.shared.contains(extra) {
             push(extra, pack.source(extra).unwrap_or_default());
