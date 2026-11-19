@@ -4,9 +4,9 @@
 //! ([`ids::Substitutes`]) for a block, item, entity, particle or sound the client's version lacks.
 //!
 //! This layer maps ids; the world packets whose layout changed between 26.2 and the pinned release are
-//! written in 26.2's layout by [`world`]. Serverbound, 26.2's `accept_teleportation`, `player_action` and
-//! `swing` are read as 26.3's (the mirror of `translate`'s writers); other packets whose layout changed
-//! still pass in the pinned layout.
+//! written in 26.2's layout by [`world`]. Serverbound, 26.2's `accept_teleportation`, `player_action`,
+//! `sign_update` and `swing` are read as 26.3's (the mirror of `translate`'s writers); other packets whose
+//! layout changed still pass in the pinned layout.
 //!
 //! The states change where vanilla's server-side `Connection` switches its codecs, after the handshake the
 //! server read itself: `login_acknowledged` and `login_finished` move each direction to configuration,
@@ -273,6 +273,9 @@ impl ClientSession {
                 self.moved(pinned, &payload)?;
                 payload
             }
+            // 26.3 reads the side as a VarInt after the four lines; older releases sent it as a boolean right
+            // after the position.
+            (State::Play, sb::SIGN_UPDATE) => sign_update(&payload)?,
             _ => payload,
         };
         let Some(ids) = self.version.ids() else {
@@ -758,6 +761,25 @@ enum Sent {
     Rewritten(Vec<u8>),
     /// It names something the client has nothing to show for.
     Dropped,
+}
+
+/// A sign_update payload as the older releases read it: position, side, four lines; written back as 26.3's
+/// (the side after the four lines, as a VarInt).
+fn sign_update(payload: &[u8]) -> Result<Vec<u8>> {
+    let mut r = Reader::new(payload);
+    let pos = r.i64()?;
+    let front = r.bool()?;
+    let mut lines = Vec::with_capacity(4);
+    for _ in 0..4 {
+        lines.push(r.string(384)?);
+    }
+    let mut w = Writer::new();
+    w.i64(pos);
+    for line in &lines {
+        w.string(line);
+    }
+    w.varint(i32::from(front));
+    Ok(w.data)
 }
 
 /// The id of `pick_item` (1.21.3 and older) for a client of `version`, from each release's packets report.
@@ -1401,6 +1423,48 @@ mod tests {
                 assert_eq!(p.item.map(|i| (i.item, i.count)), Some((1012, 3)));
             }
             other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn older_clients_send_sign_update_with_the_side_before_the_lines() {
+        for (version, front) in [
+            (ServerVersion::V26_2, true),
+            (ServerVersion::V26_2, false),
+            (ServerVersion::V1_20_6, true),
+            (ServerVersion::V1_20_6, false),
+        ] {
+            let s = ClientSession::new(version);
+            s.reading.store(to_u8(State::Play), Ordering::Release);
+            s.writing.store(to_u8(State::Play), Ordering::Release);
+            let id = version
+                .serverbound_id(State::Play, packet_ids::play::serverbound::SIGN_UPDATE)
+                .unwrap();
+            let mut w = Writer::new();
+            w.i64(crate::buf::pack_block_pos([10, 20, 30]));
+            w.bool(front);
+            let lines = ["Line 1", "Line 2", "", "End"];
+            for line in lines {
+                w.string(line);
+            }
+            let (pinned, payload) = s.serverbound(id, w.data).unwrap().unwrap();
+            assert_eq!(pinned, packet_ids::play::serverbound::SIGN_UPDATE);
+            match play::Serverbound::decode(pinned, &payload).unwrap() {
+                play::Serverbound::SignUpdate(p) => {
+                    assert_eq!(p.pos, [10, 20, 30]);
+                    assert_eq!(p.front, front);
+                    assert_eq!(
+                        p.lines,
+                        [
+                            lines[0].to_string(),
+                            lines[1].to_string(),
+                            lines[2].to_string(),
+                            lines[3].to_string(),
+                        ]
+                    );
+                }
+                other => panic!("{other:?}"),
+            }
         }
     }
 }
